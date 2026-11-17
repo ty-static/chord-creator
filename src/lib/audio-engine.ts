@@ -23,7 +23,10 @@ export interface PlayNote {
   velocity: number // 0..127
 }
 
-/** Ends a held note early (used for live keyboard input). */
+/**
+ * Ends a note early: releases a held note, or cancels one scheduled for the
+ * future (used by live keyboard input and by edits during playback).
+ */
 export type Release = () => void
 
 export interface Voice {
@@ -241,8 +244,13 @@ class AudioEngine {
           start: (n) => {
             const piece = MIDI_TO_PIECE[n.note]
             const name = piece && names[piece]
-            if (name)
-              kit.start({ note: name, time: n.time, velocity: n.velocity })
+            if (!name) return
+            const stopHit = kit.start({
+              note: name,
+              time: n.time,
+              velocity: n.velocity,
+            })
+            return () => stopHit()
           },
           stop: () => kit.stop(),
         })
@@ -314,9 +322,18 @@ class AudioEngine {
     }
     const noiseBuf = this.noise
     const sources = new Set<AudioScheduledSourceNode>()
+    let batch: AudioScheduledSourceNode[] = [] // sources made by the current hit
     const track = (s: AudioScheduledSourceNode) => {
       sources.add(s)
+      batch.push(s)
       s.onended = () => sources.delete(s)
+    }
+    const stopSource = (s: AudioScheduledSourceNode) => {
+      try {
+        s.stop()
+      } catch {
+        /* already stopped */
+      }
     }
 
     const env = (t: number, peak: number, decay: number) => {
@@ -362,6 +379,7 @@ class AudioEngine {
     return {
       start: ({ note, time: t, velocity }) => {
         const v = velocity / 127
+        batch = []
         switch (MIDI_TO_PIECE[note]) {
           case "kick":
             tone(t, 150, 45, 0.45, 0.9 * v)
@@ -387,6 +405,8 @@ class AudioEngine {
             noise(t, "highpass", 4500, 1.4, 0.3 * v)
             break
         }
+        const hit = batch
+        return () => hit.forEach(stopSource)
       },
       stop: () => {
         sources.forEach((s) => {

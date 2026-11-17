@@ -103,7 +103,7 @@ import {
   useHistory,
   useUndoShortcuts,
 } from "@/lib/use-history"
-import { usePlayer } from "@/lib/use-player"
+import { type PlaySettings, usePlayer } from "@/lib/use-player"
 import { DEFAULT_DRUMS, presetPattern } from "@/lib/drums"
 import { EXAMPLES, type Example, blankSong } from "@/lib/examples"
 
@@ -203,23 +203,7 @@ export function App() {
     [song.chords, song.key, song.voiceLeading]
   )
 
-  // Stop playback whenever the music changes so the audio never goes stale.
-  const { stop, preload } = player
-  React.useEffect(
-    () => stop(),
-    [
-      song.key,
-      song.bpm,
-      song.chords,
-      song.melody,
-      song.chordStyle,
-      song.bass,
-      song.instruments,
-      song.voiceLeading,
-      song.drums,
-      stop,
-    ]
-  )
+  const { preload } = player
 
   React.useEffect(() => engine.setReverb(song.reverb), [song.reverb])
   React.useEffect(() => engine.setMix(song.mix), [song.mix])
@@ -349,6 +333,47 @@ export function App() {
       ? { ...loopRangeRaw, end: Math.min(loopRangeRaw.end, beats) }
       : null
 
+  // The notes to play, rebuilt whenever the music changes.
+  const events = React.useMemo(
+    () => buildEvents(song, SCOPE_LAYERS.all),
+    // Only the fields that change the notes (not mix or reverb).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      song.key,
+      song.chords,
+      song.melody,
+      song.chordStyle,
+      song.bass,
+      song.voiceLeading,
+      song.drums,
+    ]
+  )
+  const playSettings = (
+    opts: { loop?: boolean; range?: LoopRange | null } = {}
+  ): PlaySettings => {
+    const range = opts.range === undefined ? loopRange : opts.range
+    return {
+      events,
+      bpm: song.bpm,
+      end: beats,
+      loop: opts.loop ?? loop,
+      loopStart: range?.start,
+      loopEnd: range?.end,
+      instruments: song.instruments,
+    }
+  }
+
+  // Keep playing while editing: hand every change to the running player.
+  const { update } = player
+  const liveSettings = playSettings()
+  const liveKey = JSON.stringify({ ...liveSettings, events: undefined })
+  React.useEffect(
+    () => void update(liveSettings),
+    // liveSettings is rebuilt each render; it only matters when these change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [update, events, liveKey]
+  )
+
   const activeChordId = React.useMemo(() => {
     if (player.beat === null) return null
     let t = 0
@@ -364,20 +389,7 @@ export function App() {
     opts: { loop?: boolean; range?: LoopRange | null } = {}
   ) => {
     if (!beats) return toast.error("Add at least one chord first.")
-    const range = opts.range === undefined ? loopRange : opts.range
-    const looping = opts.loop ?? loop
-    void player.play(
-      buildEvents(song, SCOPE_LAYERS.all),
-      song.bpm,
-      {
-        from,
-        end: beats,
-        loop: looping,
-        loopStart: range?.start,
-        loopEnd: range?.end,
-      },
-      song.instruments
-    )
+    void player.play(playSettings(opts), from)
   }
 
   const togglePlay = () => {
@@ -390,9 +402,7 @@ export function App() {
     if (range) {
       setLoop(true)
       playFrom(range.start, { loop: true, range })
-    } else if (player.playing) {
-      playFrom(Math.floor(player.beat ?? 0), { range: null })
-    }
+    } // Clearing the range: the running player just carries on over the whole song.
   }
 
   // Space bar = play / stop (unless typing or using a control that needs it).
