@@ -37,7 +37,9 @@ import {
   type ScaleId,
   chordName,
   noteNameWithOctave,
+  uid,
 } from "@/lib/music"
+import { makeSection } from "@/lib/sections"
 
 export interface PendingImport {
   filename: string
@@ -95,21 +97,25 @@ function ImportForm({ pending, song, onCancel, onImport }: Props) {
       return next
     })
 
-  const doImport = () =>
+  const doImport = () => {
+    const section = makeSection(
+      "Verse",
+      result.chords,
+      result.melody,
+      result.drums ?? { ...DEFAULT_DRUMS, enabled: false }
+    )
     onImport(
       {
         ...song,
         key,
         bpm,
-        chords: result.chords,
-        melody: result.melody,
+        sections: [section],
+        arrangement: [{ id: uid(), section: section.id }],
         bass: result.bass || song.bass,
-        drums: result.drums
-          ? result.drums
-          : { ...(song.drums ?? DEFAULT_DRUMS), enabled: false },
       },
       `“${filename}”`
     )
+  }
 
   const preview = result.chords.slice(0, 12).map((c) => chordName(c, key))
 

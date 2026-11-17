@@ -67,6 +67,8 @@ export interface MidiOptions {
   programs?: Partial<Record<TrackName, number>>
   /** Channel volume (CC7) per track, 0..1. */
   volumes?: Partial<Record<TrackName, number>>
+  /** Named points in the song (sections), shown as markers in DAWs. */
+  markers?: { beat: number; text: string }[]
 }
 
 export function buildMidi(events: NoteEvent[], opts: MidiOptions): Uint8Array {
@@ -90,6 +92,14 @@ export function buildMidi(events: NoteEvent[], opts: MidiOptions): Uint8Array {
         ],
       },
       { tick: 0, order: 1, bytes: [0xff, 0x58, 0x04, 4, 2, 24, 8] },
+      ...(opts.markers ?? []).map((m) => {
+        const t = text(m.text)
+        return {
+          tick: Math.round(m.beat * PPQ),
+          order: 1,
+          bytes: [0xff, 0x06, ...vlq(t.length), ...t],
+        }
+      }),
       {
         tick: 0,
         order: 1,
@@ -152,8 +162,12 @@ export function buildMidi(events: NoteEvent[], opts: MidiOptions): Uint8Array {
   return new Uint8Array([...header, ...tracks.flat()])
 }
 
-export function downloadBytes(bytes: Uint8Array, filename: string) {
-  const blob = new Blob([bytes as BlobPart], { type: "audio/midi" })
+export function downloadBytes(
+  bytes: Uint8Array,
+  filename: string,
+  type = "audio/midi"
+) {
+  const blob = new Blob([bytes as BlobPart], { type })
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
   a.href = url

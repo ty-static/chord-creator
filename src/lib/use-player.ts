@@ -1,8 +1,19 @@
 import * as React from "react"
 
-import type { NoteEvent, TrackName } from "@/lib/arrange"
-import { type Release, type Voice, engine } from "@/lib/audio-engine"
+import type { TrackName } from "@/lib/arrange"
+import { type Voice, engine } from "@/lib/audio-engine"
 import type { TrackInstruments } from "@/lib/instruments"
+import {
+  type PlaySettings,
+  type Transport,
+  advance,
+  beatAt,
+  createTransport,
+  instrumentsKey,
+  replan,
+} from "@/lib/scheduler"
+
+export type { PlaySettings }
 
 const TRACKS: TrackName[] = ["chords", "melody", "bass", "drums"]
 
@@ -14,130 +25,6 @@ async function loadVoices(instruments: TrackInstruments) {
     TrackName,
     Voice
   >
-}
-
-/** Everything the player needs to know about the music. Can change while playing. */
-export interface PlaySettings {
-  events: NoteEvent[]
-  bpm: number
-  /** End of the song in beats. */
-  end: number
-  loop: boolean
-  /** Section to repeat when looping (defaults to the whole song). */
-  loopStart?: number
-  loopEnd?: number
-  instruments: TrackInstruments
-}
-
-/** Audio scheduling runs this far ahead of the clock (seconds). It's longer
- *  than background-tab timer throttling (~1s), so loops stay seamless in a
- *  hidden tab; edits still apply at once because future notes are cancelled. */
-const LOOKAHEAD = 1.5
-/** Notes are scheduled in slices of this many beats. */
-const CHUNK = 0.5
-/** An edit takes effect this long after it happens (seconds). */
-const EDIT_LATENCY = 0.05
-
-/** A point where the playhead jumps or the tempo changes. */
-interface Anchor {
-  time: number
-  beat: number
-  spb: number
-}
-
-interface Transport {
-  token: number
-  ctx: AudioContext
-  voices: Record<TrackName, Voice>
-  instrumentsKey: string
-  settings: PlaySettings
-  /** Next beat to schedule, and the audio time it plays at. */
-  cursorBeat: number
-  cursorTime: number
-  /** Also start notes that are already sounding at the cursor (after a jump). */
-  carry: boolean
-  anchors: Anchor[]
-  /** Notes scheduled but maybe not started yet, so edits can cancel them. */
-  scheduled: { time: number; release: Release | void }[]
-  /** Audio time the song ends (when not looping), once known. */
-  endTime: number | null
-}
-
-const keyOf = (i: TrackInstruments) => JSON.stringify(i)
-
-function bounds(s: PlaySettings) {
-  if (!s.loop) return { start: 0, stop: s.end }
-  const start = Math.max(0, Math.min(s.loopStart ?? 0, s.end))
-  const stop = Math.min(s.loopEnd ?? s.end, s.end)
-  return stop > start ? { start, stop } : { start: 0, stop: s.end }
-}
-
-function beatAt(tr: Transport, time: number) {
-  let a = tr.anchors[0]
-  for (const x of tr.anchors) if (x.time <= time) a = x
-  return a.beat + Math.max(0, time - a.time) / a.spb
-}
-
-/** Schedule one slice of notes at the cursor. Returns false once the song has ended. */
-function scheduleChunk(tr: Transport) {
-  const s = tr.settings
-  const spb = 60 / s.bpm
-  const { start, stop } = bounds(s)
-  if (tr.cursorBeat >= stop) {
-    if (!s.loop || stop <= start) {
-      tr.endTime = tr.cursorTime
-      return false
-    }
-    tr.cursorBeat = start
-    tr.carry = true
-    tr.anchors.push({ time: tr.cursorTime, beat: start, spb })
-  }
-  const from = tr.cursorBeat
-  const to = Math.min(stop, from + CHUNK)
-  for (const e of s.events) {
-    const end = e.start + e.duration
-    const starts = e.start >= from && e.start < to
-    const sounding = tr.carry && e.start < from && end > from
-    if (!starts && !sounding) continue
-    const at = Math.max(e.start, from)
-    const time = tr.cursorTime + (at - from) * spb
-    const release = tr.voices[e.track].start({
-      note: e.midi,
-      time,
-      // Clip at the loop/song end so nothing hangs over the jump.
-      duration: (Math.min(end, stop) - at) * spb,
-      velocity: e.velocity,
-    })
-    tr.scheduled.push({ time, release })
-  }
-  tr.carry = false
-  tr.cursorTime += (to - from) * spb
-  tr.cursorBeat = to
-  return true
-}
-
-/** Re-plan everything from shortly after now, using the transport's current settings. */
-function replan(tr: Transport, pump: () => void) {
-  const t = tr.ctx.currentTime + EDIT_LATENCY
-  let b = beatAt(tr, t)
-  // Cancel notes that haven't started yet; they are rescheduled below.
-  tr.scheduled = tr.scheduled.filter((n) => {
-    if (n.time < t) return true
-    n.release?.()
-    return false
-  })
-  const { start, stop } = bounds(tr.settings)
-  tr.carry = false
-  tr.endTime = null
-  if (tr.settings.loop && (b < start || b >= stop)) {
-    b = start
-    tr.carry = true
-  }
-  tr.anchors = tr.anchors.filter((a) => a.time < t)
-  tr.anchors.push({ time: t, beat: b, spb: 60 / tr.settings.bpm })
-  tr.cursorBeat = b
-  tr.cursorTime = t
-  pump()
 }
 
 /** Plays NoteEvents through the sampled-instrument engine and reports a beat playhead.
@@ -179,17 +66,8 @@ export function usePlayer() {
   const pump = React.useCallback(() => {
     const tr = transportRef.current
     if (!tr || tr.token !== tokenRef.current) return
-    const now = tr.ctx.currentTime
-    while (tr.endTime === null && tr.cursorTime < now + LOOKAHEAD)
-      if (!scheduleChunk(tr)) break
-    if (tr.endTime !== null && now >= tr.endTime) {
-      halt() // let the last notes ring out naturally
-      return
-    }
-    // Forget notes that have started, and anchors that are behind us.
-    tr.scheduled = tr.scheduled.filter((n) => n.time > now - 0.05)
-    while (tr.anchors.length > 1 && tr.anchors[1].time <= now)
-      tr.anchors.shift()
+    // When the song ends, let the last notes ring out naturally.
+    if (advance(tr, engine.context().currentTime)) halt()
   }, [halt])
 
   /** Swap in new music while playing. Does nothing when stopped. */
@@ -201,16 +79,21 @@ export function usePlayer() {
         return
       }
       tr.settings = settings
-      replan(tr, pump)
-      const key = keyOf(settings.instruments)
+      replan(tr, engine.context().currentTime)
+      pump()
+      const key = instrumentsKey(settings.instruments)
       if (key === tr.instrumentsKey) return
       // New instrument: keep playing with the old one until it has loaded.
       const voices = await loadVoices(settings.instruments)
-      if (transportRef.current !== tr || keyOf(tr.settings.instruments) !== key)
+      if (
+        transportRef.current !== tr ||
+        instrumentsKey(tr.settings.instruments) !== key
+      )
         return
       tr.voices = voices
       tr.instrumentsKey = key
-      replan(tr, pump)
+      replan(tr, engine.context().currentTime)
+      pump()
     },
     [pump]
   )
@@ -232,24 +115,21 @@ export function usePlayer() {
       setLoading(false)
       setPlaying(true)
 
-      const { start, stop: end } = bounds(latest)
-      const begin = latest.loop && (from < start || from >= end) ? start : from
-      const t0 = ctx.currentTime + 0.12
       transportRef.current = {
-        token,
-        ctx,
-        voices,
-        instrumentsKey: keyOf(settings.instruments),
-        settings: latest,
-        cursorBeat: begin,
-        cursorTime: t0,
-        carry: true,
-        anchors: [{ time: t0, beat: begin, spb: 60 / latest.bpm }],
-        scheduled: [],
-        endTime: null,
+        ...createTransport({
+          token,
+          voices,
+          settings: latest,
+          from,
+          now: ctx.currentTime,
+        }),
+        instrumentsKey: instrumentsKey(settings.instruments),
       }
       // Instruments changed while loading: switch over once they're ready.
-      if (keyOf(latest.instruments) !== keyOf(settings.instruments))
+      if (
+        instrumentsKey(latest.instruments) !==
+        instrumentsKey(settings.instruments)
+      )
         void update(latest)
       pump()
       timerRef.current = window.setInterval(pump, 100)

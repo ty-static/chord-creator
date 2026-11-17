@@ -1,6 +1,7 @@
-import type { ChordStyle, Song } from "@/lib/arrange"
+import type { ChordStyle, Section, Song } from "@/lib/arrange"
 import { DEFAULT_MIX } from "@/lib/audio-engine"
-import { DEFAULT_DRUMS, presetPattern } from "@/lib/drums"
+import { DEFAULT_DRUMS, type DrumSettings, presetPattern } from "@/lib/drums"
+import { makeSection } from "@/lib/sections"
 import type { TrackInstruments } from "@/lib/instruments"
 import {
   type Chord,
@@ -15,6 +16,20 @@ export interface Example {
   label: string
   description: string
   build: () => Song
+}
+
+/** One section of a song: its chords, melody and beat. */
+interface PartSpec {
+  name: string
+  degrees: number[]
+  type?: ChordType | ChordType[]
+  beats?: number
+  density: number
+  seed: number
+  /** Drum preset id; omit for no drums. */
+  drums?: string
+  fill?: boolean
+  crash?: boolean
 }
 
 interface Spec {
@@ -34,37 +49,56 @@ interface Spec {
   drums?: string
   fill?: boolean
   crash?: boolean
+  /** Name of the first section (default "Verse"). */
+  name?: string
+  /** More sections after the first one (B, C…). */
+  more?: PartSpec[]
+  /** The form as section indexes (default: each section once). */
+  form?: number[]
+}
+
+function drumsOf(p: PartSpec): DrumSettings {
+  return p.drums
+    ? {
+        enabled: true,
+        pattern: presetPattern(p.drums),
+        fill: p.fill ?? false,
+        crashAtStart: p.crash ?? false,
+      }
+    : { ...DEFAULT_DRUMS, enabled: false }
+}
+
+function makePart(p: PartSpec): Section {
+  const chords: Chord[] = p.degrees.map((degree, i) => ({
+    id: uid(),
+    degree,
+    type: Array.isArray(p.type)
+      ? p.type[i % p.type.length]
+      : (p.type ?? "triad"),
+    inversion: 0,
+    beats: p.beats ?? 4,
+  }))
+  const melody = generateMelody(chords, { density: p.density, seed: p.seed })
+  return makeSection(p.name, chords, melody, drumsOf(p))
 }
 
 function make(spec: Spec): Song {
-  const chords: Chord[] = spec.degrees.map((degree, i) => ({
-    id: uid(),
-    degree,
-    type: Array.isArray(spec.type)
-      ? spec.type[i % spec.type.length]
-      : (spec.type ?? "triad"),
-    inversion: 0,
-    beats: spec.beats ?? 4,
-  }))
+  const parts = [{ ...spec, name: spec.name ?? "Verse" }, ...(spec.more ?? [])]
+  const sections = parts.map((p) =>
+    makePart({ ...p, type: p.type ?? spec.type })
+  )
+  const form = spec.form ?? sections.map((_, i) => i)
   return {
     key: spec.key,
     bpm: spec.bpm,
-    chords,
-    melody: generateMelody(chords, { density: spec.density, seed: spec.seed }),
+    sections,
+    arrangement: form.map((i) => ({ id: uid(), section: sections[i].id })),
     chordStyle: spec.style,
     bass: spec.bass ?? true,
     instruments: spec.instruments,
     reverb: spec.reverb ?? 0.25,
     mix: structuredClone(DEFAULT_MIX),
     voiceLeading: spec.voiceLeading ?? true,
-    drums: spec.drums
-      ? {
-          enabled: true,
-          pattern: presetPattern(spec.drums),
-          fill: spec.fill ?? false,
-          crashAtStart: spec.crash ?? false,
-        }
-      : { ...DEFAULT_DRUMS, enabled: false },
   }
 }
 
@@ -72,12 +106,13 @@ export const EXAMPLES: Example[] = [
   {
     id: "pop",
     label: "Pop Anthem",
-    description: "C major · I–V–vi–IV · 112 BPM",
+    description: "C major · verse, chorus & bridge · 112 BPM",
     build: () =>
       make({
         key: { root: 0, scale: "major" },
         bpm: 112,
-        degrees: [0, 4, 5, 3],
+        name: "Verse",
+        degrees: [5, 3, 0, 4],
         style: "pulse",
         instruments: {
           chords: "grand_piano",
@@ -86,9 +121,28 @@ export const EXAMPLES: Example[] = [
           drums: "kit_lm2",
         },
         drums: "pop",
-        crash: true,
-        density: 0.6,
+        density: 0.45,
         seed: 1201,
+        more: [
+          {
+            name: "Chorus",
+            degrees: [0, 4, 5, 3],
+            drums: "pop",
+            crash: true,
+            fill: true,
+            density: 0.7,
+            seed: 1207,
+          },
+          {
+            name: "Bridge",
+            degrees: [1, 4, 2, 5],
+            drums: "halftime",
+            fill: true,
+            density: 0.5,
+            seed: 1213,
+          },
+        ],
+        form: [0, 1, 0, 1, 2, 1],
       }),
   },
   {
@@ -206,11 +260,17 @@ export const EXAMPLES: Example[] = [
   },
 ]
 
-/** A nearly empty song: one tonic chord, no melody. */
+/** A nearly empty song: one section with a tonic chord and no melody. */
 export function blankSong(previous: Song): Song {
+  const section = makeSection(
+    "Verse",
+    [{ id: uid(), degree: 0, type: "triad", inversion: 0, beats: 4 }],
+    [],
+    structuredClone(previous.sections[0]?.drums ?? DEFAULT_DRUMS)
+  )
   return {
     ...previous,
-    chords: [{ id: uid(), degree: 0, type: "triad", inversion: 0, beats: 4 }],
-    melody: [],
+    sections: [section],
+    arrangement: [{ id: uid(), section: section.id }],
   }
 }

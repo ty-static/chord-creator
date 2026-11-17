@@ -8,6 +8,7 @@ import {
   CacheStorage,
   DrumMachine,
   Reverb,
+  Scheduler,
   Soundfont,
   SplendidGrandPiano,
 } from "smplr"
@@ -104,28 +105,49 @@ interface Bus {
   send: GainNode
 }
 
-class AudioEngine {
-  private ctx: AudioContext | null = null
+export interface EngineOptions {
+  /** Creates the context the engine plays into (a live or an offline one). */
+  createContext: () => BaseAudioContext
+  /** Hand notes straight to Web Audio instead of queueing them on a timer.
+   *  Needed for an OfflineAudioContext, whose clock only runs while rendering. */
+  immediate?: boolean
+  mix?: Mix
+  reverb?: number
+}
+
+export class AudioEngine {
+  private ctx: BaseAudioContext | null = null
+  private scheduler: Scheduler | undefined
   private master!: GainNode
   private reverb!: ReturnType<typeof Reverb>
   private buses!: Record<TrackName, Bus>
   private voices = new Map<string, Promise<Voice>>()
   private live = new Set<Voice>()
-  private reverbMix = 0.25
-  private gains: Record<TrackName, number> = trackGains(DEFAULT_MIX)
+  private reverbMix: number
+  private gains: Record<TrackName, number>
   private listeners = new Set<() => void>()
   status: EngineStatus = { loading: [], failed: [] }
 
+  private options: EngineOptions
+
+  constructor(options: EngineOptions) {
+    this.options = options
+    this.reverbMix = options.reverb ?? 0.25
+    this.gains = trackGains(options.mix ?? DEFAULT_MIX)
+  }
+
   context() {
     if (!this.ctx) {
-      const ctx = new AudioContext({ latencyHint: "interactive" })
+      const ctx = this.options.createContext()
+      if (this.options.immediate)
+        this.scheduler = Scheduler(ctx, { lookaheadMs: 1e9 })
       const comp = ctx.createDynamicsCompressor()
       comp.threshold.value = -14
       comp.ratio.value = 3
       this.master = ctx.createGain()
       this.master.gain.value = 0.9
       this.master.connect(comp).connect(ctx.destination)
-      this.reverb = Reverb(ctx)
+      this.reverb = Reverb(ctx as AudioContext) // works on any BaseAudioContext
       this.reverb.connect(this.master)
       this.ctx = ctx
       this.buses = Object.fromEntries(
@@ -143,9 +165,15 @@ class AudioEngine {
   }
 
   async resume() {
-    const ctx = this.context()
+    const ctx = this.context() as AudioContext
     if (ctx.state !== "running") await ctx.resume()
     return ctx
+  }
+
+  /** Resolves once the reverb is ready to process audio. */
+  reverbReady() {
+    this.context()
+    return this.reverb.ready()
   }
 
   subscribe = (cb: () => void) => {
@@ -206,7 +234,9 @@ class AudioEngine {
 
     const [lo, hi] = TRACK_RANGE[track]
     const notes = Array.from({ length: hi - lo + 1 }, (_, i) => lo + i)
+    const scheduler = this.scheduler ? { scheduler: this.scheduler } : {}
     const common = {
+      ...scheduler,
       destination: this.buses[track].input,
       ...(storage ? { storage } : {}),
       volume: TRACK_VOLUME[track],
@@ -218,6 +248,7 @@ class AudioEngine {
       if (def.source.kind === "drums") {
         const { machine, map } = def.source
         const kit = DrumMachine(ctx, {
+          ...scheduler,
           instrument: machine,
           destination: this.buses[track].input,
           ...(storage ? { storage } : {}),
@@ -474,4 +505,7 @@ class AudioEngine {
   }
 }
 
-export const engine = new AudioEngine()
+/** The engine the app plays through. */
+export const engine = new AudioEngine({
+  createContext: () => new AudioContext({ latencyHint: "interactive" }),
+})

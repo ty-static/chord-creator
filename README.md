@@ -9,6 +9,9 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
 
 - **Key & tempo** — 12 roots × 9 scales (major, minor and the modes); chords
   and melody are stored as scale degrees, so changing key moves everything.
+- **Song sections** — verse, chorus, bridge and more, each with its own
+  chords, melody and drum beat. Order and repeat them as a form (`A A B A`):
+  drag, type the letters, loop one part, or split off a variation.
 - **Chords** — diatonic palette, presets, randomize, triads/7ths/9ths/sus,
   inversions, drag to reorder, optional automatic voice leading.
 - **Melody** — piano-roll editor (draw, drag, resize, keyboard nudging),
@@ -19,9 +22,13 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
 - **Sound** — sampled piano, pads, strings, bass and more (via
   [smplr](https://github.com/danigb/smplr)), per-track volume / mute / solo,
   reverb, built-in synth fallback when offline.
-- **Timeline** — click to play from a bar, drag to loop a section.
-- **MIDI export** — format-1 file with tempo, key signature, programs and
-  separate chord / melody / bass / drum tracks (drums on channel 10).
+- **Timeline** — the whole form with section colours; click to play from a
+  bar, drag to loop bars. Playback keeps going while you edit.
+- **MIDI export** — format-1 file with tempo, key signature, programs,
+  section markers and separate chord / melody / bass / drum tracks (drums on
+  channel 10).
+- **WAV export** — renders the song offline with the same instruments, mix
+  and reverb, as 16-bit 44.1 kHz stereo.
 - **MIDI import** — reads `.mid` files, guesses each track's role and the key,
   and converts them into chords, melody and a drum pattern.
 - **MIDI keyboard** — Web MIDI input (Chrome/Edge): play through the current
@@ -43,18 +50,21 @@ Built with Vite, React 19, TypeScript, Tailwind CSS v4 and
 
 ### Layout
 
-| Path | What it does |
-| --- | --- |
-| `src/lib/music.ts` | Keys, scales, chords, melody generator, bar tools, voice leading |
-| `src/lib/arrange.ts` | Turns a song into timed note events (chords, melody, bass, drums) |
-| `src/lib/drums.ts` | Drum pieces, presets and pattern expansion |
-| `src/lib/audio-engine.ts` | Web Audio engine: sampled instruments, buses, mixer, reverb |
-| `src/lib/use-player.ts` | Look-ahead playback scheduler with looping |
-| `src/lib/midi.ts` | MIDI file writer |
-| `src/lib/midi-import.ts` | MIDI file parser and song converter |
-| `src/lib/harmony.ts` | Chord / key recognition shared by import and keyboard input |
-| `src/lib/midi-input.ts` | Web MIDI keyboard input |
-| `src/components/` | Editors, timeline, sound panel, dialogs and shadcn/ui components |
+| Path                      | What it does                                                              |
+| ------------------------- | ------------------------------------------------------------------------- |
+| `src/lib/music.ts`        | Keys, scales, chords, melody generator, bar tools, voice leading          |
+| `src/lib/arrange.ts`      | Song model; lays out the form and turns it into timed note events         |
+| `src/lib/sections.ts`     | Section and form editing, form letters, saved-song migration              |
+| `src/lib/drums.ts`        | Drum pieces, presets and pattern expansion                                |
+| `src/lib/audio-engine.ts` | Web Audio engine: sampled instruments, buses, mixer, reverb               |
+| `src/lib/scheduler.ts`    | Look-ahead playback scheduling with looping and live edits (pure, tested) |
+| `src/lib/use-player.ts`   | React hook that drives the scheduler with the real audio clock            |
+| `src/lib/render.ts`       | Offline WAV rendering and encoding                                        |
+| `src/lib/midi.ts`         | MIDI file writer                                                          |
+| `src/lib/midi-import.ts`  | MIDI file parser and song converter                                       |
+| `src/lib/harmony.ts`      | Chord / key recognition shared by import and keyboard input               |
+| `src/lib/midi-input.ts`   | Web MIDI keyboard input                                                   |
+| `src/components/`         | Editors, timeline, sound panel, dialogs and shadcn/ui components          |
 
 ## Deployment
 

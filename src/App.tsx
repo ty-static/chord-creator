@@ -1,5 +1,6 @@
 import * as React from "react"
 import {
+  AudioLinesIcon,
   DownloadIcon,
   CircleHelpIcon,
   FilePlusIcon,
@@ -33,7 +34,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { type LoopRange, Timeline } from "@/components/timeline"
+import { sectionColor } from "@/components/section-style"
+import { SongForm } from "@/components/song-form"
+import {
+  type LoopRange,
+  Timeline,
+  type TimelinePart,
+} from "@/components/timeline"
 import { useTheme } from "@/components/theme-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -67,7 +74,10 @@ import {
   type ChordStyle,
   type Song,
   type TrackName,
+  type Section,
   buildEvents,
+  layout,
+  placedAt,
 } from "@/lib/arrange"
 import {
   DEFAULT_MIX,
@@ -80,6 +90,7 @@ import { MidiParseError, parseMidi } from "@/lib/midi-import"
 import { type MidiNoteEvent, midiInput } from "@/lib/midi-input"
 import { DEFAULT_INSTRUMENTS, INSTRUMENTS } from "@/lib/instruments"
 import { buildMidi, downloadBytes } from "@/lib/midi"
+import { audibleTracks, encodeWav, renderSong } from "@/lib/render"
 import {
   PRESETS,
   ROOTS,
@@ -105,7 +116,15 @@ import {
 } from "@/lib/use-history"
 import { type PlaySettings, usePlayer } from "@/lib/use-player"
 import { DEFAULT_DRUMS, presetPattern } from "@/lib/drums"
+import { cn } from "@/lib/utils"
 import { EXAMPLES, type Example, blankSong } from "@/lib/examples"
+import {
+  formString,
+  makeSection,
+  migrateSong,
+  sectionLetter,
+  updateSection,
+} from "@/lib/sections"
 
 const STORAGE_KEY = "chord-creator:song"
 const TOUR_KEY = "chord-creator:tour-seen"
@@ -115,7 +134,6 @@ const SOUND_DEFAULTS = {
   reverb: 0.25,
   mix: DEFAULT_MIX,
   voiceLeading: false,
-  drums: DEFAULT_DRUMS,
 }
 
 function initialSong(): Song {
@@ -123,10 +141,14 @@ function initialSong(): Song {
     const saved = localStorage.getItem(STORAGE_KEY)
     if (saved) {
       // Fill in fields added in later versions of the app.
-      const s = JSON.parse(saved) as Partial<Song>
+      const parsed = JSON.parse(saved) as Parameters<typeof migrateSong>[0]
+      // Songs saved before sections existed kept one loop at the top level.
+      const s: Partial<Song> & Record<string, unknown> = { ...parsed }
+      for (const old of ["chords", "melody", "drums"]) delete s[old]
       return {
         ...SOUND_DEFAULTS,
         ...s,
+        ...migrateSong(parsed),
         instruments: { ...DEFAULT_INSTRUMENTS, ...s.instruments },
         mix: {
           chords: { ...DEFAULT_MIX.chords, ...s.mix?.chords },
@@ -134,22 +156,26 @@ function initialSong(): Song {
           bass: { ...DEFAULT_MIX.bass, ...s.mix?.bass },
           drums: { ...DEFAULT_MIX.drums, ...s.mix?.drums },
         },
-        drums: { ...DEFAULT_DRUMS, ...s.drums },
       } as Song
     }
   } catch {
     /* ignore corrupt storage */
   }
   const chords = chordsFromPreset(PRESETS[0])
+  const verse = makeSection(
+    "Verse",
+    chords,
+    generateMelody(chords, { density: 0.55, seed: 7 }),
+    { ...DEFAULT_DRUMS, enabled: true, pattern: presetPattern("pop") }
+  )
   return {
     key: { root: 0, scale: "major" },
     bpm: 100,
-    chords,
-    melody: generateMelody(chords, { density: 0.55, seed: 7 }),
+    sections: [verse],
+    arrangement: [{ id: uid(), section: verse.id }],
     chordStyle: "block",
     bass: true,
     ...SOUND_DEFAULTS,
-    drums: { ...DEFAULT_DRUMS, enabled: true, pattern: presetPattern("pop") },
   }
 }
 
@@ -171,6 +197,10 @@ export function App() {
   useUndoShortcuts(history.undo, history.redo)
   const [loop, setLoop] = React.useState(true)
   const [scope, setScope] = React.useState<ExportScope>("all")
+  const [rendering, setRendering] = React.useState<{
+    stage: "loading" | "rendering"
+    fraction: number
+  } | null>(null)
   const player = usePlayer()
   const { theme, setTheme } = useTheme()
 
@@ -180,7 +210,17 @@ export function App() {
 
   const patch = (p: Partial<Song>, opts?: SetOptions) =>
     history.set((s) => ({ ...s, ...p }), opts)
-  const beats = totalBeats(song.chords)
+
+  // Sections: the form laid out in time, and the section open in the editors.
+  const placed = React.useMemo(() => layout(song), [song])
+  const beats = placed.reduce((n, p) => n + p.beats, 0)
+  const [selectedId, setSelectedId] = React.useState<string | null>(null)
+  const section =
+    song.sections.find((s) => s.id === selectedId) ?? song.sections[0]
+  const sectionIndex = song.sections.indexOf(section)
+  const patchSection = (p: Partial<Omit<Section, "id">>, opts?: SetOptions) =>
+    history.set((s) => updateSection(s, section.id, p), opts)
+  const anyDrums = song.sections.some((s) => s.drums.enabled)
 
   // Welcome tour: shown automatically on the first visit.
   const [tourOpen, setTourOpen] = React.useState(
@@ -198,10 +238,18 @@ export function App() {
     })
   }
   const loadExample = (ex: Example) => loadSong(ex.build(), `“${ex.label}”`)
-  const voicings = React.useMemo(
-    () => voiceChords(song.chords, song.key, song.voiceLeading),
-    [song.chords, song.key, song.voiceLeading]
+  // How each section's chords are voiced (inversions), by section id.
+  const voicingsById = React.useMemo(
+    () =>
+      new Map(
+        song.sections.map((s) => [
+          s.id,
+          voiceChords(s.chords, song.key, song.voiceLeading),
+        ])
+      ),
+    [song.sections, song.key, song.voiceLeading]
   )
+  const voicings = voicingsById.get(section.id) ?? []
 
   const { preload } = player
 
@@ -281,7 +329,7 @@ export function App() {
       inversion: guess.inversion,
       beats: 4,
     }
-    patch({ chords: [...song.chords, chord] })
+    patchSection({ chords: [...section.chords, chord] })
     toast.success(`Added ${chordName(chord, song.key)}`)
   }
 
@@ -326,8 +374,21 @@ export function App() {
       { coalesce }
     )
 
-  // Loop section chosen on the timeline (ignored if the song got shorter than it).
-  const [loopRangeRaw, setLoopRange] = React.useState<LoopRange | null>(null)
+  // What to loop: bars dragged on the timeline, or one part of the form
+  // (which follows that part when the form changes).
+  const [loopTarget, setLoopTarget] = React.useState<
+    LoopRange | { slot: string } | null
+  >(null)
+  const loopSlot =
+    loopTarget && "slot" in loopTarget
+      ? placed.find((p) => p.slot.id === loopTarget.slot && p.beats > 0)
+      : undefined
+  const loopRangeRaw: LoopRange | null = loopSlot
+    ? { start: loopSlot.start, end: loopSlot.start + loopSlot.beats }
+    : loopTarget && "start" in loopTarget
+      ? loopTarget
+      : null
+  // Ignored if the song got shorter than it.
   const loopRange =
     loopRangeRaw && loopRangeRaw.start < beats
       ? { ...loopRangeRaw, end: Math.min(loopRangeRaw.end, beats) }
@@ -340,12 +401,11 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       song.key,
-      song.chords,
-      song.melody,
+      song.sections,
+      song.arrangement,
       song.chordStyle,
       song.bass,
       song.voiceLeading,
-      song.drums,
     ]
   )
   const playSettings = (
@@ -374,15 +434,42 @@ export function App() {
     [update, events, liveKey]
   )
 
-  const activeChordId = React.useMemo(() => {
-    if (player.beat === null) return null
-    let t = 0
-    for (const c of song.chords) {
-      if (player.beat < t + c.beats) return c.id
+  // Where the playhead is: which part of the form, and which chord in it.
+  const playing = player.beat === null ? null : placedAt(placed, player.beat)
+  let playingChord: Chord | null = null
+  if (playing && player.beat !== null) {
+    let t = playing.start
+    for (const c of playing.section.chords) {
+      if (player.beat < t + c.beats) {
+        playingChord = c
+        break
+      }
       t += c.beats
     }
-    return null
-  }, [player.beat, song.chords])
+  }
+  // The editors show the playhead only while the open section plays.
+  const localBeat =
+    playing && player.beat !== null && playing.section.id === section.id
+      ? player.beat - playing.start
+      : null
+  const activeChordId = localBeat !== null ? (playingChord?.id ?? null) : null
+
+  const timelineParts: TimelinePart[] = placed.map((p) => {
+    const index = song.sections.indexOf(p.section)
+    const v = voicingsById.get(p.section.id)
+    return {
+      slotId: p.slot.id,
+      sectionId: p.section.id,
+      letter: sectionLetter(index),
+      name: p.section.name,
+      colorIndex: index,
+      start: p.start,
+      beats: p.beats,
+      chords: p.section.chords.map((c, i) =>
+        v?.[i] ? { ...c, inversion: v[i].inversion } : c
+      ),
+    }
+  })
 
   const playFrom = (
     from: number,
@@ -398,11 +485,23 @@ export function App() {
   }
 
   const changeLoopRange = (range: LoopRange | null) => {
-    setLoopRange(range)
+    setLoopTarget(range)
     if (range) {
       setLoop(true)
       playFrom(range.start, { loop: true, range })
     } // Clearing the range: the running player just carries on over the whole song.
+  }
+
+  /** Loop one part of the form (null: stop looping it). */
+  const loopPart = (slotId: string | null) => {
+    const p = placed.find((x) => x.slot.id === slotId)
+    if (!p) return changeLoopRange(null)
+    setLoopTarget({ slot: p.slot.id })
+    setLoop(true)
+    playFrom(p.start, {
+      loop: true,
+      range: { start: p.start, end: p.start + p.beats },
+    })
   }
 
   // Space bar = play / stop (unless typing or using a control that needs it).
@@ -419,19 +518,68 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey)
   }, [])
 
-  const exportMidi = () => {
-    const events = buildEvents(song, SCOPE_LAYERS[scope])
-    if (!events.length) return toast.error("Nothing to export yet.")
+  const exportName = (ext: string) => {
     const name = keyLabel(song.key)
       .replace(/♯/g, "sharp")
       .replace(/♭/g, "b")
       .replace(/\s+/g, "-")
-    const filename = `chord-creator_${name}_${song.bpm}bpm${scope === "all" ? "" : `_${scope}`}.mid`
+    return `chord-creator_${name}_${song.bpm}bpm${scope === "all" ? "" : `_${scope}`}.${ext}`
+  }
+
+  const exportWav = async () => {
+    const events = buildEvents(song, SCOPE_LAYERS[scope])
+    if (!events.length) return toast.error("Nothing to export yet.")
+    if (!audibleTracks(events, song.mix).length)
+      return toast.error("Those tracks are muted. Unmute them to export audio.")
+    setRendering({ stage: "loading", fraction: 0 })
+    try {
+      const out = await renderSong({
+        events,
+        bpm: song.bpm,
+        end: beats,
+        instruments: song.instruments,
+        mix: song.mix,
+        reverb: song.reverb,
+        onProgress: (stage, fraction) => setRendering({ stage, fraction }),
+      })
+      const filename = exportName("wav")
+      downloadBytes(
+        encodeWav(out.channels, out.sampleRate),
+        filename,
+        "audio/wav"
+      )
+      const secs = Math.round(out.channels[0].length / out.sampleRate)
+      toast.success(`Exported ${filename}`, {
+        description: out.fallbacks.length
+          ? `${out.fallbacks.join(", ")} couldn't load, so the built-in synth plays instead.`
+          : `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")} of 44.1 kHz stereo audio.`,
+      })
+    } catch (err) {
+      console.error(err)
+      toast.error("Couldn't render the audio.", {
+        description: "Your browser may not support offline audio rendering.",
+      })
+    } finally {
+      setRendering(null)
+    }
+  }
+
+  const exportMidi = () => {
+    const events = buildEvents(song, SCOPE_LAYERS[scope])
+    if (!events.length) return toast.error("Nothing to export yet.")
+    const filename = exportName("mid")
     downloadBytes(
       buildMidi(events, {
         bpm: song.bpm,
         title: `Chord Creator – ${keyLabel(song.key)}`,
         keySig: keySignature(song.key),
+        markers:
+          song.arrangement.length > 1
+            ? placed.map((p) => ({
+                beat: p.start,
+                text: p.section.name,
+              }))
+            : undefined,
         programs: {
           chords: INSTRUMENTS[song.instruments.chords]?.program,
           melody: INSTRUMENTS[song.instruments.melody]?.program,
@@ -761,7 +909,7 @@ export function App() {
               mix={song.mix}
               reverb={song.reverb}
               bassEnabled={song.bass}
-              drumsEnabled={song.drums.enabled}
+              drumsEnabled={anyDrums}
               status={player.status}
               onInstrument={setInstrument}
               onMix={setMix}
@@ -773,8 +921,9 @@ export function App() {
             <CardHeader>
               <CardTitle>Export</CardTitle>
               <CardDescription>
-                {song.chords.length} chords · {beats / 4} bars ·{" "}
-                {song.melody.length} melody notes
+                {song.sections.length}{" "}
+                {song.sections.length === 1 ? "section" : "sections"} ·{" "}
+                {beats / 4} {beats === 4 ? "bar" : "bars"} · {formString(song)}
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -792,7 +941,7 @@ export function App() {
                       "chords",
                       "melody",
                       song.bass && "bass",
-                      song.drums.enabled && "drums",
+                      anyDrums && "drums",
                     ]
                       .filter(Boolean)
                       .join(" + ")
@@ -803,39 +952,88 @@ export function App() {
                     Chords only{song.bass ? " (+ bass)" : ""}
                   </SelectItem>
                   <SelectItem value="melody">Melody only</SelectItem>
-                  <SelectItem value="drums" disabled={!song.drums.enabled}>
+                  <SelectItem value="drums" disabled={!anyDrums}>
                     Drums only
                   </SelectItem>
                 </SelectContent>
               </Select>
-              <Button size="lg" onClick={exportMidi}>
-                <DownloadIcon /> Download MIDI
-              </Button>
+              <div className="grid grid-cols-2 gap-2">
+                <Button size="lg" onClick={exportMidi}>
+                  <DownloadIcon /> MIDI
+                </Button>
+                <Button
+                  size="lg"
+                  variant="outline"
+                  onClick={exportWav}
+                  disabled={!!rendering}
+                >
+                  {rendering ? (
+                    <>
+                      <Loader2Icon className="animate-spin" />
+                      {rendering.stage === "loading"
+                        ? "Loading…"
+                        : `${Math.round(rendering.fraction * 100)}%`}
+                    </>
+                  ) : (
+                    <>
+                      <AudioLinesIcon /> WAV
+                    </>
+                  )}
+                </Button>
+              </div>
               <p className="text-xs text-muted-foreground">
-                Standard MIDI file with separate tracks, tempo and key signature
-                — drag it into any DAW.
+                MIDI keeps separate tracks, tempo and key for your DAW. WAV is
+                the finished sound — your instruments, mix and reverb — ready to
+                play or share anywhere.
               </p>
             </CardContent>
           </Card>
         </aside>
 
         <div className="order-2 flex min-w-0 flex-col gap-4 lg:order-none">
+          <SongForm
+            song={song}
+            placed={placed}
+            selectedId={section.id}
+            playingSlotId={playing?.slot.id ?? null}
+            loopSlotId={loop ? (loopSlot?.slot.id ?? null) : null}
+            onSelect={setSelectedId}
+            onChange={(next) => history.set(next)}
+            onLoopSlot={loopPart}
+            onPlayFrom={(beat) => playFrom(beat)}
+          />
           <Timeline
-            voicings={voicings}
             musicKey={song.key}
-            chords={song.chords}
+            parts={timelineParts}
             playheadBeat={player.beat}
             loopRange={loopRange}
-            activeChordId={activeChordId}
+            activeChordKey={
+              playing && playingChord
+                ? `${playing.slot.id}:${playingChord.id}`
+                : null
+            }
+            selectedSectionId={section.id}
+            onSelectSection={setSelectedId}
             onSeek={(beat) => playFrom(beat)}
             onLoopChange={changeLoopRange}
           />
           <Tabs value={tab} onValueChange={setTab} className="min-w-0">
-            <TabsList>
-              <TabsTrigger value="chords">Chords</TabsTrigger>
-              <TabsTrigger value="melody">Melody</TabsTrigger>
-              <TabsTrigger value="drums">Drums</TabsTrigger>
-            </TabsList>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <TabsList>
+                <TabsTrigger value="chords">Chords</TabsTrigger>
+                <TabsTrigger value="melody">Melody</TabsTrigger>
+                <TabsTrigger value="drums">Drums</TabsTrigger>
+              </TabsList>
+              <EditingBadge
+                letter={sectionLetter(sectionIndex)}
+                colorIndex={sectionIndex}
+                name={section.name}
+                count={
+                  song.arrangement.filter((s) => s.section === section.id)
+                    .length
+                }
+              />
+            </div>
             <TabsContent value="chords" className="mt-2">
               <KeyboardInputBar
                 label="Chord input"
@@ -847,17 +1045,17 @@ export function App() {
                 voicings={voicings}
                 voiceLeading={song.voiceLeading}
                 musicKey={song.key}
-                chords={song.chords}
+                chords={section.chords}
                 onChange={(chords) => {
                   // Trim melody notes that now fall past the end of the progression.
                   const end = totalBeats(chords) * STEPS_PER_BEAT
-                  const melody = song.melody
+                  const melody = section.melody
                     .filter((n) => n.start < end)
                     .map((n) => ({
                       ...n,
                       length: Math.min(n.length, end - n.start),
                     }))
-                  patch({ chords, melody })
+                  patchSection({ chords, melody })
                 }}
                 activeChordId={activeChordId}
                 onPreview={(m) =>
@@ -868,10 +1066,11 @@ export function App() {
             <TabsContent value="melody" className="mt-2">
               <MelodyEditor
                 musicKey={song.key}
-                chords={song.chords}
-                melody={song.melody}
-                onChange={(melody) => patch({ melody })}
-                playheadBeat={player.beat}
+                key={section.id}
+                chords={section.chords}
+                melody={section.melody}
+                onChange={(melody) => patchSection({ melody })}
+                playheadBeat={localBeat}
                 onPreview={(m) =>
                   void player.preview([m], "melody", song.instruments.melody)
                 }
@@ -879,9 +1078,9 @@ export function App() {
             </TabsContent>
             <TabsContent value="drums" className="mt-2">
               <DrumEditor
-                drums={song.drums}
-                onChange={(drums) => patch({ drums })}
-                playheadBeat={player.playing ? player.beat : null}
+                drums={section.drums}
+                onChange={(drums) => patchSection({ drums })}
+                playheadBeat={player.playing ? localBeat : null}
                 onPreview={(m) =>
                   void player.preview([m], "drums", song.instruments.drums)
                 }
@@ -921,6 +1120,36 @@ const SHORTCUTS: [string, string][] = [
   ["Shift + ← →", "Shorten / lengthen selected note"],
   ["Esc", "Deselect · cancel drag"],
 ]
+
+/** Which section the editors below are showing. */
+function EditingBadge({
+  letter,
+  colorIndex,
+  name,
+  count,
+}: {
+  letter: string
+  colorIndex: number
+  name: string
+  count: number
+}) {
+  return (
+    <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+      Editing
+      <span
+        className={cn(
+          "flex size-5 items-center justify-center rounded text-[11px] font-bold",
+          sectionColor(colorIndex).letter
+        )}
+      >
+        {letter}
+      </span>
+      <span className="font-medium text-foreground">{name}</span>
+      {count > 1 && <span>· plays {count}×</span>}
+      {count === 0 && <span>· not in the song</span>}
+    </p>
+  )
+}
 
 function ShortcutList() {
   return (
