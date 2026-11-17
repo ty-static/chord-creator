@@ -11,6 +11,13 @@ import {
 import type { TrackInstruments } from "@/lib/instruments"
 import type { Mix } from "@/lib/audio-engine"
 import { type DrumSettings, drumHits } from "@/lib/drums"
+import {
+  HUMANIZE_TIME,
+  HUMANIZE_VELOCITY,
+  clampVelocity,
+  noise,
+  swingTime,
+} from "@/lib/feel"
 
 export type ChordStyle = "block" | "pulse" | "arpeggio"
 export type TrackName = "chords" | "melody" | "bass" | "drums"
@@ -31,7 +38,24 @@ export interface Section {
   chords: Chord[]
   melody: MelodyNote[]
   drums: DrumSettings
+  // How the section is played. All optional: unset means "as the song".
+  /** Tracks that sit this section out, e.g. no drums in the intro. */
+  tacet?: TrackName[]
+  /** Chord rhythm for this section only. */
+  chordStyle?: ChordStyle
+  /** Loudness, from 0.5 (soft) to 1.5 (loud). 1 plays as written. */
+  energy?: number
+  /** Key change in semitones, e.g. 2 lifts a last chorus up a step. */
+  transpose?: number
 }
+
+export const MIN_ENERGY = 0.5
+export const MAX_ENERGY = 1.5
+export const MAX_TRANSPOSE = 6
+
+/** Whether a section is played differently from the rest of the song. */
+export const hasSectionStyle = (s: Section) =>
+  !!s.tacet?.length || !!s.chordStyle || (s.energy ?? 1) !== 1 || !!s.transpose
 
 /** One place in the song's form. The same section can appear in many slots. */
 export interface Slot {
@@ -40,6 +64,8 @@ export interface Slot {
 }
 
 export interface Song {
+  /** Shown in the song library and used for file names. */
+  title: string
   key: Key
   bpm: number
   /** Every section, in letter order (A, B, C…). */
@@ -55,20 +81,30 @@ export interface Song {
   mix: Mix
   /** Re-voice chords so each moves as little as possible from the last. */
   voiceLeading: boolean
+  /** 0 = straight, 1 = full triplet swing. */
+  swing?: number
+  /** 0 = exact, 1 = the most timing and velocity variation. */
+  humanize?: number
 }
 
 /** What one section needs to become notes. */
 export type Part = Pick<Song, "key" | "chordStyle" | "bass" | "voiceLeading"> &
-  Pick<Section, "chords" | "melody" | "drums">
+  Pick<
+    Section,
+    "chords" | "melody" | "drums" | "tacet" | "energy" | "transpose"
+  >
 
 export const partOf = (song: Song, section: Section): Part => ({
   key: song.key,
-  chordStyle: song.chordStyle,
+  chordStyle: section.chordStyle ?? song.chordStyle,
   bass: song.bass,
   voiceLeading: song.voiceLeading,
   chords: section.chords,
   melody: section.melody,
   drums: section.drums,
+  tacet: section.tacet,
+  energy: section.energy,
+  transpose: section.transpose,
 })
 
 /** A slot of the form placed on the song's beat grid. */
@@ -118,7 +154,36 @@ export function buildEvents(
       part = partEvents(partOf(song, p.section), layers)
       cache.set(p.section.id, part)
     }
-    for (const e of part) events.push({ ...e, start: e.start + p.start })
+    const swing = song.swing ?? 0
+    const human = song.humanize ?? 0
+    const track = (t: TrackName) => TRACK_NAMES.indexOf(t)
+    for (const e of part) {
+      if (!swing && !human) {
+        events.push({ ...e, start: e.start + p.start })
+        continue
+      }
+      // Swing within the section, then nudge by a repeatable random amount.
+      // Notes never move before the start of their slot, so a loop of the
+      // slot still plays them.
+      let start = swingTime(e.start, swing)
+      const end = swingTime(e.start + e.duration, swing)
+      let velocity = e.velocity
+      if (human) {
+        const seed = Math.round(e.start * 960)
+        const id = e.midi * 8 + track(e.track)
+        start += noise(p.index, id, seed) * HUMANIZE_TIME * human
+        velocity = clampVelocity(
+          velocity + noise(seed, p.index, id) * HUMANIZE_VELOCITY * human
+        )
+      }
+      start = Math.max(0, start)
+      events.push({
+        ...e,
+        start: start + p.start,
+        duration: Math.max(0.05, end - start),
+        velocity,
+      })
+    }
   }
   return events
 }
@@ -126,8 +191,10 @@ export function buildEvents(
 /** The notes of one section, starting at beat 0. */
 export function partEvents(
   song: Part,
-  layers: Record<TrackName, boolean>
+  allLayers: Record<TrackName, boolean>
 ): NoteEvent[] {
+  const layers = { ...allLayers }
+  for (const t of song.tacet ?? []) layers[t] = false
   const events: NoteEvent[] = []
   let t = 0
 
@@ -202,5 +269,13 @@ export function partEvents(
         track: "drums",
       })
   }
-  return events
+
+  const energy = song.energy ?? 1
+  const shift = song.transpose ?? 0
+  if (energy === 1 && !shift) return events
+  return events.map((e) => ({
+    ...e,
+    midi: e.track === "drums" ? e.midi : e.midi + shift,
+    velocity: clampVelocity(e.velocity * energy),
+  }))
 }

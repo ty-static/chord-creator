@@ -89,6 +89,7 @@ function make(spec: Spec): Song {
   )
   const form = spec.form ?? sections.map((_, i) => i)
   return {
+    title: "",
     key: spec.key,
     bpm: spec.bpm,
     sections,
@@ -102,7 +103,7 @@ function make(spec: Spec): Song {
   }
 }
 
-export const EXAMPLES: Example[] = [
+const RAW_EXAMPLES: Example[] = [
   {
     id: "pop",
     label: "Pop Anthem",
@@ -260,6 +261,12 @@ export const EXAMPLES: Example[] = [
   },
 ]
 
+/** Example songs, each titled with its label. */
+export const EXAMPLES: Example[] = RAW_EXAMPLES.map((ex) => ({
+  ...ex,
+  build: () => ({ ...ex.build(), title: ex.label }),
+}))
+
 /** A nearly empty song: one section with a tonic chord and no melody. */
 export function blankSong(previous: Song): Song {
   const section = makeSection(
@@ -270,6 +277,7 @@ export function blankSong(previous: Song): Song {
   )
   return {
     ...previous,
+    title: "Untitled song",
     sections: [section],
     arrangement: [{ id: uid(), section: section.id }],
   }

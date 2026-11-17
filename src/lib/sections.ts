@@ -96,6 +96,10 @@ export function copySection(section: Section, name: string): Section {
     chords: section.chords.map((c) => ({ ...c, id: uid() })),
     melody: section.melody.map((m) => ({ ...m, id: uid() })),
     drums: structuredClone(section.drums),
+    tacet: section.tacet && [...section.tacet],
+    chordStyle: section.chordStyle,
+    energy: section.energy,
+    transpose: section.transpose,
   }
 }
 

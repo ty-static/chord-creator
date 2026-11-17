@@ -2,6 +2,8 @@ import * as React from "react"
 import {
   AudioLinesIcon,
   DownloadIcon,
+  FolderOpenIcon,
+  LinkIcon,
   CircleHelpIcon,
   FilePlusIcon,
   KeyboardIcon,
@@ -36,6 +38,16 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { sectionColor } from "@/components/section-style"
 import { SongForm } from "@/components/song-form"
+import {
+  SectionSettings,
+  sectionKey,
+  sectionStyleSummary,
+} from "@/components/section-settings"
+import {
+  ShareLinkDialog,
+  SongLibrary,
+  SongTitle,
+} from "@/components/song-library"
 import {
   type LoopRange,
   Timeline,
@@ -79,20 +91,14 @@ import {
   layout,
   placedAt,
 } from "@/lib/arrange"
-import {
-  DEFAULT_MIX,
-  type Release,
-  type TrackMix,
-  engine,
-} from "@/lib/audio-engine"
+import { type Release, type TrackMix, engine } from "@/lib/audio-engine"
 import { chordFromPitches } from "@/lib/harmony"
 import { MidiParseError, parseMidi } from "@/lib/midi-import"
 import { type MidiNoteEvent, midiInput } from "@/lib/midi-input"
-import { DEFAULT_INSTRUMENTS, INSTRUMENTS } from "@/lib/instruments"
+import { INSTRUMENTS } from "@/lib/instruments"
 import { buildMidi, downloadBytes } from "@/lib/midi"
 import { audibleTracks, encodeWav, renderSong } from "@/lib/render"
 import {
-  PRESETS,
   ROOTS,
   SCALES,
   type ScaleId,
@@ -101,8 +107,6 @@ import {
   chordName,
   uid,
   voiceChords,
-  chordsFromPreset,
-  generateMelody,
   keyLabel,
   keySignature,
   noteName,
@@ -115,69 +119,39 @@ import {
   useUndoShortcuts,
 } from "@/lib/use-history"
 import { type PlaySettings, usePlayer } from "@/lib/use-player"
-import { DEFAULT_DRUMS, presetPattern } from "@/lib/drums"
 import { cn } from "@/lib/utils"
 import { EXAMPLES, type Example, blankSong } from "@/lib/examples"
+import { Library, type LibraryEntry } from "@/lib/library"
 import {
-  formString,
-  makeSection,
-  migrateSong,
-  sectionLetter,
-  updateSection,
-} from "@/lib/sections"
+  SongFileError,
+  decodeShare,
+  defaultSong,
+  fileSlug,
+  parseSongFile,
+  sameSong,
+  shareCode,
+  shareUrl,
+  songFile,
+} from "@/lib/song-file"
+import { formString, sectionLetter, updateSection } from "@/lib/sections"
 
-const STORAGE_KEY = "chord-creator:song"
 const TOUR_KEY = "chord-creator:tour-seen"
 
-const SOUND_DEFAULTS = {
-  instruments: DEFAULT_INSTRUMENTS,
-  reverb: 0.25,
-  mix: DEFAULT_MIX,
-  voiceLeading: false,
-}
+// The song library, and the song to open first. Opened once per page load
+// (outside React, so StrictMode's double render can't add a song twice).
+const library = new Library(localStorage)
+let boot: { id: string; song: Song } | null = null
+/** The time now (outside render: only called from event handlers). */
+const clock = () => Date.now()
+const bootSong = () => (boot ??= library.open(defaultSong))
 
-function initialSong(): Song {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved) {
-      // Fill in fields added in later versions of the app.
-      const parsed = JSON.parse(saved) as Parameters<typeof migrateSong>[0]
-      // Songs saved before sections existed kept one loop at the top level.
-      const s: Partial<Song> & Record<string, unknown> = { ...parsed }
-      for (const old of ["chords", "melody", "drums"]) delete s[old]
-      return {
-        ...SOUND_DEFAULTS,
-        ...s,
-        ...migrateSong(parsed),
-        instruments: { ...DEFAULT_INSTRUMENTS, ...s.instruments },
-        mix: {
-          chords: { ...DEFAULT_MIX.chords, ...s.mix?.chords },
-          melody: { ...DEFAULT_MIX.melody, ...s.mix?.melody },
-          bass: { ...DEFAULT_MIX.bass, ...s.mix?.bass },
-          drums: { ...DEFAULT_MIX.drums, ...s.mix?.drums },
-        },
-      } as Song
-    }
-  } catch {
-    /* ignore corrupt storage */
-  }
-  const chords = chordsFromPreset(PRESETS[0])
-  const verse = makeSection(
-    "Verse",
-    chords,
-    generateMelody(chords, { density: 0.55, seed: 7 }),
-    { ...DEFAULT_DRUMS, enabled: true, pattern: presetPattern("pop") }
-  )
-  return {
-    key: { root: 0, scale: "major" },
-    bpm: 100,
-    sections: [verse],
-    arrangement: [{ id: uid(), section: verse.id }],
-    chordStyle: "block",
-    bass: true,
-    ...SOUND_DEFAULTS,
-  }
-}
+/** "my_song-v2.mid" → "my song v2" */
+const titleFromFile = (name: string) =>
+  name
+    .replace(/\.[^.]+$/, "")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .slice(0, 60) || "Imported song"
 
 const SPACE_EXEMPT =
   "input, textarea, select, [contenteditable=true], [role=slider], [role=switch], [role=combobox], [role=option], [role=tab], [role=radio], [role=checkbox], [role=menuitem], [aria-roledescription=sortable]"
@@ -192,8 +166,9 @@ const SCOPE_LAYERS: Record<ExportScope, Record<TrackName, boolean>> = {
 }
 
 export function App() {
-  const history = useHistory<Song>(initialSong)
+  const history = useHistory<Song>(() => bootSong().song)
   const song = history.value
+  const [songId, setSongId] = React.useState(() => bootSong().id)
   useUndoShortcuts(history.undo, history.redo)
   const [loop, setLoop] = React.useState(true)
   const [scope, setScope] = React.useState<ExportScope>("all")
@@ -204,9 +179,21 @@ export function App() {
   const player = usePlayer()
   const { theme, setTheme } = useTheme()
 
+  // Save every change to the library. The song as it was opened isn't
+  // re-saved, so opening a song doesn't count as editing it.
+  const openedRef = React.useRef<Song>(song)
+  const saveWarned = React.useRef(false)
   React.useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(song))
-  }, [song])
+    if (song === openedRef.current) return
+    if (library.save(songId, song)) saveWarned.current = false
+    else if (!saveWarned.current) {
+      saveWarned.current = true
+      toast.error("Couldn't save your song", {
+        description:
+          "The browser's storage is full or blocked. Download a song file to keep a copy.",
+      })
+    }
+  }, [song, songId])
 
   const patch = (p: Partial<Song>, opts?: SetOptions) =>
     history.set((s) => ({ ...s, ...p }), opts)
@@ -221,6 +208,8 @@ export function App() {
   const patchSection = (p: Partial<Omit<Section, "id">>, opts?: SetOptions) =>
     history.set((s) => updateSection(s, section.id, p), opts)
   const anyDrums = song.sections.some((s) => s.drums.enabled)
+  /** The selected section's key change, for previews while editing. */
+  const shift = section.transpose ?? 0
 
   // Welcome tour: shown automatically on the first visit.
   const [tourOpen, setTourOpen] = React.useState(
@@ -231,13 +220,6 @@ export function App() {
     if (!open) localStorage.setItem(TOUR_KEY, "1")
   }
 
-  const loadSong = (next: Song, label: string) => {
-    history.set(next)
-    toast.success(`Loaded ${label}`, {
-      action: { label: "Undo", onClick: () => history.undo() },
-    })
-  }
-  const loadExample = (ex: Example) => loadSong(ex.build(), `“${ex.label}”`)
   // How each section's chords are voiced (inversions), by section id.
   const voicingsById = React.useMemo(
     () =>
@@ -277,39 +259,6 @@ export function App() {
   const [pendingImport, setPendingImport] =
     React.useState<PendingImport | null>(null)
   const fileRef = React.useRef<HTMLInputElement>(null)
-  const openMidiFile = async (file: File) => {
-    try {
-      const midi = parseMidi(await file.arrayBuffer())
-      setPendingImport({ filename: file.name, midi })
-    } catch (err) {
-      toast.error(`Couldn't read ${file.name}`, {
-        description:
-          err instanceof MidiParseError
-            ? err.message
-            : "The file doesn't look like a valid MIDI file.",
-      })
-    }
-  }
-  React.useEffect(() => {
-    const isFileDrag = (e: DragEvent) =>
-      e.dataTransfer?.types.includes("Files") ?? false
-    const over = (e: DragEvent) => {
-      if (isFileDrag(e)) e.preventDefault()
-    }
-    const drop = (e: DragEvent) => {
-      const file = e.dataTransfer?.files[0]
-      if (!file) return
-      e.preventDefault()
-      if (/\.midi?$/i.test(file.name)) void openMidiFile(file)
-      else toast.error("Drop a .mid or .midi file to import it.")
-    }
-    window.addEventListener("dragover", over)
-    window.addEventListener("drop", drop)
-    return () => {
-      window.removeEventListener("dragover", over)
-      window.removeEventListener("drop", drop)
-    }
-  }, [])
 
   // ---- MIDI keyboard: play-through and chord input
   const [tab, setTab] = React.useState("chords")
@@ -406,6 +355,8 @@ export function App() {
       song.chordStyle,
       song.bass,
       song.voiceLeading,
+      song.swing,
+      song.humanize,
     ]
   )
   const playSettings = (
@@ -504,6 +455,290 @@ export function App() {
     })
   }
 
+  // ---- Song library: switching songs, examples, share links
+  const [libraryOpen, setLibraryOpen] = React.useState(false)
+  const [entries, setEntries] = React.useState<LibraryEntry[]>([])
+  const [listedAt, setListedAt] = React.useState(0)
+  const refreshList = () => {
+    setEntries(library.list())
+    setListedAt(clock())
+  }
+  const showLibrary = () => {
+    refreshList()
+    setLibraryOpen(true)
+  }
+  // An example or blank song opened as a new song is dropped again if you
+  // move on without changing it, so trying examples doesn't fill the list.
+  const scratchRef = React.useRef<{ id: string; song: Song } | null>(null)
+
+  // The open song as of the last render. Toast buttons (Back, Undo, Open)
+  // run after other switches, so they read this rather than their own render.
+  const openRef = React.useRef({ id: songId, song })
+  React.useLayoutEffect(() => {
+    openRef.current = { id: songId, song }
+  })
+
+  const songById = (id: string) =>
+    id === openRef.current.id ? openRef.current.song : library.load(id)
+
+  const switchTo = (id: string, next: Song) => {
+    const open = openRef.current
+    const scratch = scratchRef.current
+    if (
+      scratch &&
+      scratch.id === open.id &&
+      scratch.song === open.song &&
+      id !== open.id
+    )
+      library.remove(open.id)
+    scratchRef.current = null
+    player.stop()
+    openedRef.current = next
+    history.reset(next)
+    setSongId(id)
+    setSelectedId(null)
+    setLoopTarget(null)
+    library.setCurrent(id)
+  }
+
+  const openSong = (id: string) => {
+    const next = songById(id)
+    if (!next) {
+      refreshList()
+      return toast.error("That song is no longer in My songs.")
+    }
+    switchTo(id, next)
+    setLibraryOpen(false)
+  }
+
+  /** Add a song to the library and open it. */
+  const openNew = (
+    next: Song,
+    opts: { label: string; scratch?: boolean; description?: string }
+  ) => {
+    const back = openRef.current.id
+    const id = library.add(next)
+    switchTo(id, next)
+    if (opts.scratch) scratchRef.current = { id, song: next }
+    setLibraryOpen(false)
+    toast.success(`Opened ${opts.label}`, {
+      description:
+        opts.description ??
+        (opts.scratch
+          ? "As a new song. It's kept in My songs once you change it."
+          : "Added to My songs."),
+      action: { label: "Back", onClick: () => openSong(back) },
+    })
+  }
+
+  const loadExample = (ex: Example) =>
+    openNew(ex.build(), { label: `“${ex.label}”`, scratch: true })
+  const newSong = () =>
+    openNew(blankSong(song), { label: "a new song", scratch: true })
+
+  const renameSong = (id: string, title: string) => {
+    if (id === songId) patch({ title })
+    else {
+      const s = library.load(id)
+      if (s) library.save(id, { ...s, title })
+    }
+    // The list reads storage; let the save effect run first for the open song.
+    setTimeout(refreshList, 0)
+  }
+
+  const duplicateSong = (id: string) => {
+    const s = songById(id)
+    if (!s) return
+    const copyId = library.add({
+      ...s,
+      title: `${s.title} (copy)`.slice(0, 60),
+    })
+    refreshList()
+    toast.success(`Duplicated “${s.title}”`, {
+      action: { label: "Open", onClick: () => openSong(copyId) },
+    })
+  }
+
+  const downloadSong = (id: string) => {
+    const s = songById(id)
+    if (s)
+      downloadBytes(
+        songFile([s]),
+        `${fileSlug(s.title)}.json`,
+        "application/json"
+      )
+  }
+
+  const deleteSong = (id: string) => {
+    const s = songById(id)
+    if (!s) return
+    const wasOpen = id === songId
+    library.remove(id)
+    if (wasOpen) {
+      const next = library.list()[0]
+      const nextSong = next && library.load(next.id)
+      if (next && nextSong) switchTo(next.id, nextSong)
+      else {
+        const blank = blankSong(s)
+        switchTo(library.add(blank), blank)
+      }
+    }
+    refreshList()
+    toast(`Deleted “${s.title}”`, {
+      action: {
+        label: "Undo",
+        onClick: () => {
+          library.save(id, s)
+          if (wasOpen) openSong(id)
+          refreshList()
+        },
+      },
+    })
+  }
+
+  const backupAll = () => {
+    const songs = library
+      .list()
+      .map((e) => songById(e.id))
+      .filter((x): x is Song => !!x)
+    const date = new Date().toISOString().slice(0, 10)
+    downloadBytes(
+      songFile(songs),
+      `chord-creator-backup-${date}.json`,
+      "application/json"
+    )
+    toast.success(
+      `Backed up ${songs.length} ${songs.length === 1 ? "song" : "songs"}`
+    )
+  }
+
+  // Share links: the whole song is packed into the link's #hash.
+  const [manualShare, setManualShare] = React.useState<string | null>(null)
+  const shareSong = async () => {
+    const url = await shareUrl(song, window.location.href)
+    const long = url.length > 8000
+    try {
+      await navigator.clipboard.writeText(url)
+      toast.success("Share link copied", {
+        description: long
+          ? "This song makes a very long link that some apps may cut off. A song file is safer."
+          : `Anyone who opens it gets their own copy of “${song.title}”.`,
+      })
+    } catch {
+      setManualShare(url)
+    }
+  }
+  const onShareHash = React.useEffectEvent(async () => {
+    const code = shareCode(window.location.hash)
+    if (!code) return
+    // Clear the link first, so a reload doesn't add the song again.
+    window.history.replaceState(
+      null,
+      "",
+      window.location.pathname + window.location.search
+    )
+    try {
+      const shared = await decodeShare(code)
+      openNew(shared, {
+        label: `“${shared.title}”`,
+        description: "A shared song, now saved in My songs.",
+      })
+    } catch (err) {
+      toast.error("Couldn't open the shared song", {
+        description: err instanceof SongFileError ? err.message : undefined,
+      })
+    }
+  })
+  React.useEffect(() => {
+    // After mount (and only once under StrictMode, whose first run is cancelled).
+    const first = setTimeout(() => void onShareHash())
+    const onHash = () => void onShareHash()
+    window.addEventListener("hashchange", onHash)
+    return () => {
+      clearTimeout(first)
+      window.removeEventListener("hashchange", onHash)
+    }
+  }, [])
+
+  // ---- Opening files: MIDI or song files, by button or drop
+  const openFile = (file: File) => {
+    if (/\.json$/i.test(file.name)) void onSongFile(file)
+    else if (/\.midi?$/i.test(file.name)) void openMidiFile(file)
+    else
+      toast.error(`Can't open ${file.name}`, {
+        description:
+          "Choose a MIDI file (.mid) or a Chord Creator song file (.json).",
+      })
+  }
+  const onSongFile = React.useEffectEvent(async (file: File) => {
+    try {
+      const songs = parseSongFile(await file.text())
+      if (songs.length === 1)
+        return openNew(songs[0], { label: `“${songs[0].title}”` })
+      // Restoring a backup twice shouldn't double every song.
+      const have = library
+        .list()
+        .map((e) => songById(e.id))
+        .filter((x): x is Song => !!x)
+      const fresh = songs.filter((s) => !have.some((h) => sameSong(h, s)))
+      for (const s of fresh) library.add(s)
+      refreshList()
+      setLibraryOpen(true)
+      const skipped = songs.length - fresh.length
+      toast.success(
+        fresh.length
+          ? `Added ${fresh.length} ${fresh.length === 1 ? "song" : "songs"} to My songs`
+          : "You already have all of these songs",
+        {
+          description:
+            skipped && fresh.length
+              ? `${skipped} were already in My songs.`
+              : undefined,
+        }
+      )
+    } catch (err) {
+      toast.error(`Couldn't open ${file.name}`, {
+        description:
+          err instanceof SongFileError
+            ? err.message
+            : "The file doesn't look like a Chord Creator song.",
+      })
+    }
+  })
+  const openMidiFile = async (file: File) => {
+    try {
+      const midi = parseMidi(await file.arrayBuffer())
+      setPendingImport({ filename: file.name, midi })
+    } catch (err) {
+      toast.error(`Couldn't read ${file.name}`, {
+        description:
+          err instanceof MidiParseError
+            ? err.message
+            : "The file doesn't look like a valid MIDI file.",
+      })
+    }
+  }
+  const openDropped = React.useEffectEvent((file: File) => openFile(file))
+  React.useEffect(() => {
+    const isFileDrag = (e: DragEvent) =>
+      e.dataTransfer?.types.includes("Files") ?? false
+    const over = (e: DragEvent) => {
+      if (isFileDrag(e)) e.preventDefault()
+    }
+    const drop = (e: DragEvent) => {
+      const file = e.dataTransfer?.files[0]
+      if (!file) return
+      e.preventDefault()
+      openDropped(file)
+    }
+    window.addEventListener("dragover", over)
+    window.addEventListener("drop", drop)
+    return () => {
+      window.removeEventListener("dragover", over)
+      window.removeEventListener("drop", drop)
+    }
+  }, [])
+
   // Space bar = play / stop (unless typing or using a control that needs it).
   const onSpace = React.useEffectEvent(() => togglePlay())
   React.useEffect(() => {
@@ -518,13 +753,8 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey)
   }, [])
 
-  const exportName = (ext: string) => {
-    const name = keyLabel(song.key)
-      .replace(/♯/g, "sharp")
-      .replace(/♭/g, "b")
-      .replace(/\s+/g, "-")
-    return `chord-creator_${name}_${song.bpm}bpm${scope === "all" ? "" : `_${scope}`}.${ext}`
-  }
+  const exportName = (ext: string) =>
+    `${fileSlug(song.title)}${scope === "all" ? "" : `_${scope}`}.${ext}`
 
   const exportWav = async () => {
     const events = buildEvents(song, SCOPE_LAYERS[scope])
@@ -571,7 +801,7 @@ export function App() {
     downloadBytes(
       buildMidi(events, {
         bpm: song.bpm,
-        title: `Chord Creator – ${keyLabel(song.key)}`,
+        title: song.title,
         keySig: keySignature(song.key),
         markers:
           song.arrangement.length > 1
@@ -610,31 +840,42 @@ export function App() {
             <MusicIcon className="size-5" />
           </div>
           <div className="mr-auto min-w-0">
-            <h1 className="truncate font-heading text-base leading-tight font-semibold sm:text-lg">
+            <h1 className="text-xs leading-tight text-muted-foreground max-sm:sr-only">
               Chord Creator
             </h1>
-            <p className="hidden text-xs text-muted-foreground sm:block">
-              Write chords & melodies, export to MIDI
-            </p>
+            <SongTitle
+              title={song.title}
+              onRename={(title) => patch({ title })}
+            />
           </div>
           <input
             ref={fileRef}
             type="file"
-            accept=".mid,.midi,audio/midi,audio/x-midi"
+            accept=".mid,.midi,audio/midi,audio/x-midi,.json,application/json"
             className="hidden"
             aria-hidden
             tabIndex={-1}
             onChange={(e) => {
               const file = e.target.files?.[0]
               e.target.value = ""
-              if (file) void openMidiFile(file)
+              if (file) openFile(file)
             }}
           />
           <Button
             variant="ghost"
             className="max-sm:size-9 max-sm:px-0"
+            aria-label="My songs"
+            title="Open, rename, back up and delete your songs"
+            onClick={showLibrary}
+          >
+            <FolderOpenIcon />
+            <span className="hidden sm:inline">Songs</span>
+          </Button>
+          <Button
+            variant="ghost"
+            className="max-sm:size-9 max-sm:px-0"
             aria-label="Import MIDI file"
-            title="Import a MIDI file (or drop one anywhere)"
+            title="Import a MIDI or song file (or drop one anywhere)"
             onClick={() => fileRef.current?.click()}
           >
             <UploadIcon />
@@ -670,10 +911,8 @@ export function App() {
                 </DropdownMenuItem>
               ))}
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onSelect={() => loadSong(blankSong(song), "a blank song")}
-              >
-                <FilePlusIcon /> New blank song
+              <DropdownMenuItem onSelect={newSong}>
+                <FilePlusIcon /> New song
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setTour(true)}>
                 <CircleHelpIcon /> Take the tour
@@ -854,6 +1093,25 @@ export function App() {
                   }
                 />
               </div>
+              <FeelSlider
+                label="Swing"
+                hint="Delays the off-beats for a shuffle or groove feel"
+                value={song.swing ?? 0}
+                onChange={(swing) =>
+                  patch({ swing: swing || undefined }, { coalesce: "swing" })
+                }
+              />
+              <FeelSlider
+                label="Humanize"
+                hint="Small changes in timing and loudness, like a live player"
+                value={song.humanize ?? 0}
+                onChange={(humanize) =>
+                  patch(
+                    { humanize: humanize || undefined },
+                    { coalesce: "humanize" }
+                  )
+                }
+              />
               <div className="flex flex-col gap-2">
                 <Label>Chord rhythm</Label>
                 <ToggleGroup
@@ -981,10 +1239,13 @@ export function App() {
                   )}
                 </Button>
               </div>
+              <Button variant="secondary" onClick={() => void shareSong()}>
+                <LinkIcon /> Copy share link
+              </Button>
               <p className="text-xs text-muted-foreground">
                 MIDI keeps separate tracks, tempo and key for your DAW. WAV is
-                the finished sound — your instruments, mix and reverb — ready to
-                play or share anywhere.
+                the finished sound — your instruments, mix and reverb. A share
+                link sends the whole song for others to open and edit.
               </p>
             </CardContent>
           </Card>
@@ -1032,8 +1293,31 @@ export function App() {
                   song.arrangement.filter((s) => s.section === section.id)
                     .length
                 }
+                notes={sectionStyleSummary(section, {
+                  bass: song.bass,
+                  anyDrums,
+                })}
+              />
+              <SectionSettings
+                section={section}
+                musicKey={song.key}
+                songChordStyle={song.chordStyle}
+                bass={song.bass}
+                onChange={patchSection}
               />
             </div>
+            {!!section.transpose && (
+              <p className="mt-2 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+                This section plays {Math.abs(section.transpose)}{" "}
+                {Math.abs(section.transpose) === 1 ? "semitone" : "semitones"}{" "}
+                {section.transpose > 0 ? "higher" : "lower"}, in{" "}
+                <span className="font-medium text-foreground">
+                  {keyLabel(sectionKey(song.key, section.transpose))}
+                </span>
+                . You write it in {keyLabel(song.key)}, like playing with a
+                capo.
+              </p>
+            )}
             <TabsContent value="chords" className="mt-2">
               <KeyboardInputBar
                 label="Chord input"
@@ -1059,7 +1343,11 @@ export function App() {
                 }}
                 activeChordId={activeChordId}
                 onPreview={(m) =>
-                  void player.preview(m, "chords", song.instruments.chords)
+                  void player.preview(
+                    m.map((x) => x + shift),
+                    "chords",
+                    song.instruments.chords
+                  )
                 }
               />
             </TabsContent>
@@ -1072,7 +1360,11 @@ export function App() {
                 onChange={(melody) => patchSection({ melody })}
                 playheadBeat={localBeat}
                 onPreview={(m) =>
-                  void player.preview([m], "melody", song.instruments.melody)
+                  void player.preview(
+                    [m + shift],
+                    "melody",
+                    song.instruments.melody
+                  )
                 }
               />
             </TabsContent>
@@ -1099,10 +1391,27 @@ export function App() {
         song={song}
         onCancel={() => setPendingImport(null)}
         onImport={(next, label) => {
+          const name = pendingImport?.filename ?? "Imported song"
           setPendingImport(null)
-          loadSong(next, label)
+          openNew({ ...next, title: titleFromFile(name) }, { label })
         }}
       />
+      <SongLibrary
+        open={libraryOpen}
+        onOpenChange={setLibraryOpen}
+        entries={entries}
+        now={listedAt}
+        currentId={songId}
+        onOpen={openSong}
+        onNew={newSong}
+        onRename={renameSong}
+        onDuplicate={duplicateSong}
+        onDownload={downloadSong}
+        onDelete={deleteSong}
+        onBackup={backupAll}
+        onImport={() => fileRef.current?.click()}
+      />
+      <ShareLinkDialog url={manualShare} onClose={() => setManualShare(null)} />
       <Toaster position="bottom-right" />
     </div>
   )
@@ -1127,11 +1436,14 @@ function EditingBadge({
   colorIndex,
   name,
   count,
+  notes = [],
 }: {
   letter: string
   colorIndex: number
   name: string
   count: number
+  /** How the section is played differently, e.g. "no drums". */
+  notes?: string[]
 }) {
   return (
     <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -1147,7 +1459,39 @@ function EditingBadge({
       <span className="font-medium text-foreground">{name}</span>
       {count > 1 && <span>· plays {count}×</span>}
       {count === 0 && <span>· not in the song</span>}
+      {notes.length > 0 && <span>· {notes.join(" · ")}</span>}
     </p>
+  )
+}
+
+function FeelSlider({
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  label: string
+  hint: string
+  value: number
+  onChange: (value: number) => void
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <Label className="flex justify-between" title={hint}>
+        {label}
+        <span className="font-mono text-muted-foreground">
+          {value ? `${Math.round(value * 100)}%` : "off"}
+        </span>
+      </Label>
+      <Slider
+        aria-label={label}
+        value={[value]}
+        min={0}
+        max={1}
+        step={0.05}
+        onValueChange={([v]) => onChange(Math.round(v * 100) / 100)}
+      />
+    </div>
   )
 }
 

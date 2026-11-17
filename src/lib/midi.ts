@@ -134,9 +134,23 @@ export function buildMidi(events: NoteEvent[], opts: MidiOptions): Uint8Array {
           Math.round(Math.max(0, Math.min(1, vol)) * 127),
         ],
       })
-    for (const e of evs) {
-      const on = Math.round(e.start * PPQ)
-      const off = Math.max(on + 1, Math.round((e.start + e.duration) * PPQ))
+    // A note must end before the same pitch starts again: otherwise the
+    // first note-off would cut the second note short (humanize can move
+    // a note slightly before the previous one ends).
+    const notes = evs
+      .map((e) => {
+        const on = Math.round(e.start * PPQ)
+        const off = Math.max(on + 1, Math.round((e.start + e.duration) * PPQ))
+        return { e, on, off }
+      })
+      .sort((a, b) => a.on - b.on)
+    const lastOf = new Map<number, { on: number; off: number }>()
+    for (const n of notes) {
+      const prev = lastOf.get(n.e.midi)
+      if (prev && prev.off > n.on) prev.off = Math.max(prev.on + 1, n.on)
+      lastOf.set(n.e.midi, n)
+    }
+    for (const { e, on, off } of notes) {
       raw.push({
         tick: on,
         order: 2,

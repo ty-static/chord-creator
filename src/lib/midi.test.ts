@@ -78,6 +78,47 @@ function smf(tracks: number[][], ppq = 96, format = 1) {
   return new Uint8Array(bytes).buffer
 }
 
+describe("MIDI export of overlapping notes", () => {
+  it("ends a note before the same pitch starts again", () => {
+    const events: NoteEvent[] = [
+      { midi: 60, start: 0, duration: 1, velocity: 90, track: "melody" },
+      // Starts before the first C ends (as humanize can make happen).
+      { midi: 60, start: 0.97, duration: 1, velocity: 90, track: "melody" },
+    ]
+    const notes = parseMidi(
+      toBuffer(
+        buildMidi(events, {
+          bpm: 120,
+          title: "x",
+          keySig: { sf: 0, minor: false },
+        })
+      )
+    ).parts[0].notes
+    expect(notes).toHaveLength(2)
+    expect(notes[0].end).toBeCloseTo(0.97, 2)
+    expect(notes[1].start).toBeCloseTo(0.97, 2)
+    expect(notes[1].end).toBeCloseTo(1.97, 2)
+  })
+
+  it("keeps every note of a humanized song", () => {
+    const song = { ...EXAMPLES[0].build(), humanize: 1, swing: 0.5 }
+    const events = buildEvents(song, ALL)
+    const parts = parseMidi(
+      toBuffer(
+        buildMidi(events, {
+          bpm: song.bpm,
+          title: "x",
+          keySig: keySignature(song.key),
+        })
+      )
+    ).parts
+    const count = parts.reduce((n, p) => n + p.notes.length, 0)
+    expect(count).toBe(events.length)
+    for (const p of parts)
+      for (const n of p.notes) expect(n.end).toBeGreaterThan(n.start)
+  })
+})
+
 describe("MIDI export", () => {
   const song = EXAMPLES[0].build()
   const bytes = buildMidi(buildEvents(song, ALL), {

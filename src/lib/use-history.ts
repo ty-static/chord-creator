@@ -80,9 +80,21 @@ export function useHistory<T>(init: () => T) {
     })
   }, [])
 
+  /** Start over with a new value and an empty undo stack (e.g. another song). */
+  const reset = React.useCallback((value: T) => {
+    setState({
+      past: [],
+      present: value,
+      future: [],
+      lastKey: null,
+      lastTime: 0,
+    })
+  }, [])
+
   return {
     value: state.present,
     set,
+    reset,
     undo,
     redo,
     canUndo: state.past.length > 0,

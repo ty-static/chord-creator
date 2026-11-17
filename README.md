@@ -33,8 +33,17 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   and converts them into chords, melody and a drum pattern.
 - **MIDI keyboard** — Web MIDI input (Chrome/Edge): play through the current
   instrument, add chords by playing them, step-enter melody notes.
+- **Section style** — per section: which tracks play (no drums in the intro,
+  melody only in the chorus…), its own chord rhythm, an energy level, and a
+  key change (lift the last chorus up a step).
+- **Swing and humanize** — a shuffle feel and small, repeatable changes in
+  timing and loudness, so playback and exports sound less mechanical.
+- **My songs** — every song is saved in the browser as you work. Open,
+  rename, duplicate, download or delete songs; back them all up to one
+  `.json` file and open song files or backups again (by button or drop).
+- **Share links** — the whole song is compressed into the link's `#song=`
+  hash, so no server is needed; opening one adds a copy to My songs.
 - Undo/redo, example songs, a welcome tour, light/dark theme, mobile layout.
-  The current song is saved in the browser's local storage.
 
 ## Development
 
@@ -55,11 +64,14 @@ Built with Vite, React 19, TypeScript, Tailwind CSS v4 and
 | `src/lib/music.ts`        | Keys, scales, chords, melody generator, bar tools, voice leading          |
 | `src/lib/arrange.ts`      | Song model; lays out the form and turns it into timed note events         |
 | `src/lib/sections.ts`     | Section and form editing, form letters, saved-song migration              |
+| `src/lib/feel.ts`         | Swing and humanize timing                                                 |
 | `src/lib/drums.ts`        | Drum pieces, presets and pattern expansion                                |
 | `src/lib/audio-engine.ts` | Web Audio engine: sampled instruments, buses, mixer, reverb               |
 | `src/lib/scheduler.ts`    | Look-ahead playback scheduling with looping and live edits (pure, tested) |
 | `src/lib/use-player.ts`   | React hook that drives the scheduler with the real audio clock            |
 | `src/lib/render.ts`       | Offline WAV rendering and encoding                                        |
+| `src/lib/song-file.ts`    | Song validation, `.json` song files and backups, share-link encoding      |
+| `src/lib/library.ts`      | The song library in local storage (and moving the old single save in)     |
 | `src/lib/midi.ts`         | MIDI file writer                                                          |
 | `src/lib/midi-import.ts`  | MIDI file parser and song converter                                       |
 | `src/lib/harmony.ts`      | Chord / key recognition shared by import and keyboard input               |

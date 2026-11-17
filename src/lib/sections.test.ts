@@ -58,6 +58,7 @@ function song(form = "A A B A"): Song {
   })
   const c = makeSection("Bridge", chords(5, 1, 4))
   const base: Song = {
+    title: "Test",
     key: { root: 0, scale: "major" },
     bpm: 120,
     sections: [a, b, c],
