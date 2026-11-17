@@ -5,6 +5,7 @@ import {
   FolderOpenIcon,
   LinkIcon,
   CircleHelpIcon,
+  EllipsisVerticalIcon,
   FilePlusIcon,
   KeyboardIcon,
   LibraryIcon,
@@ -23,11 +24,10 @@ import { toast } from "sonner"
 
 import { ChordEditor } from "@/components/chord-editor"
 import { DrumEditor } from "@/components/drum-editor"
-import { ImportDialog, type PendingImport } from "@/components/import-dialog"
+import type { PendingImport } from "@/components/import-dialog"
 import { KeyboardInputBar, MidiKeyboardMenu } from "@/components/midi-keyboard"
 import { MelodyEditor } from "@/components/melody-editor"
 import { SoundPanel } from "@/components/sound-panel"
-import { WelcomeTour } from "@/components/welcome-tour"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,11 +43,7 @@ import {
   sectionKey,
   sectionStyleSummary,
 } from "@/components/section-settings"
-import {
-  ShareLinkDialog,
-  SongLibrary,
-  SongTitle,
-} from "@/components/song-library"
+import { SongTitle } from "@/components/song-title"
 import {
   type LoopRange,
   Timeline,
@@ -93,11 +89,9 @@ import {
 } from "@/lib/arrange"
 import { type Release, type TrackMix, engine } from "@/lib/audio-engine"
 import { chordFromPitches } from "@/lib/harmony"
-import { MidiParseError, parseMidi } from "@/lib/midi-import"
 import { type MidiNoteEvent, midiInput } from "@/lib/midi-input"
 import { INSTRUMENTS } from "@/lib/instruments"
 import { buildMidi, downloadBytes } from "@/lib/midi"
-import { audibleTracks, encodeWav, renderSong } from "@/lib/render"
 import {
   ROOTS,
   SCALES,
@@ -135,6 +129,40 @@ import {
   songFile,
 } from "@/lib/song-file"
 import { formString, sectionLetter, updateSection } from "@/lib/sections"
+
+// Loaded the first time they're needed, to keep the first download small.
+const ImportDialog = React.lazy(() =>
+  import("@/components/import-dialog").then((m) => ({
+    default: m.ImportDialog,
+  }))
+)
+const WelcomeTour = React.lazy(() =>
+  import("@/components/welcome-tour").then((m) => ({ default: m.WelcomeTour }))
+)
+const SongLibrary = React.lazy(() =>
+  import("@/components/song-library").then((m) => ({ default: m.SongLibrary }))
+)
+const ShareLinkDialog = React.lazy(() =>
+  import("@/components/song-library").then((m) => ({
+    default: m.ShareLinkDialog,
+  }))
+)
+
+/** Mounts lazily loaded children once `when` first turns true, then keeps
+ *  them mounted so dialogs can animate closed. */
+function MountWhen({
+  when,
+  children,
+}: {
+  when: boolean
+  children: React.ReactNode
+}) {
+  const [seen, setSeen] = React.useState(when)
+  if (when && !seen) setSeen(true)
+  return seen ? (
+    <React.Suspense fallback={null}>{children}</React.Suspense>
+  ) : null
+}
 
 const TOUR_KEY = "chord-creator:tour-seen"
 
@@ -712,12 +740,13 @@ export function App() {
   })
   const openMidiFile = async (file: File) => {
     try {
+      const { parseMidi } = await import("@/lib/midi-import")
       const midi = parseMidi(await file.arrayBuffer())
       setPendingImport({ filename: file.name, midi })
     } catch (err) {
       toast.error(`Couldn't read ${file.name}`, {
         description:
-          err instanceof MidiParseError
+          err instanceof Error && err.name === "MidiParseError"
             ? err.message
             : "The file doesn't look like a valid MIDI file.",
       })
@@ -764,10 +793,14 @@ export function App() {
   const exportWav = async () => {
     const events = buildEvents(song, SCOPE_LAYERS[scope])
     if (!events.length) return toast.error("Nothing to export yet.")
-    if (!audibleTracks(events, song.mix).length)
-      return toast.error("Those tracks are muted. Unmute them to export audio.")
     setRendering({ stage: "loading", fraction: 0 })
     try {
+      const { audibleTracks, encodeWav, renderSong } =
+        await import("@/lib/render")
+      if (!audibleTracks(events, song.mix).length) {
+        toast.error("Those tracks are muted. Unmute them to export audio.")
+        return
+      }
       const out = await renderSong({
         events,
         bpm: song.bpm,
@@ -840,11 +873,11 @@ export function App() {
   return (
     <div className="min-h-svh bg-background">
       <header className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center gap-1 px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
-          <div className="hidden size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground sm:flex">
+        <div className="mx-auto flex max-w-7xl items-center gap-1 px-3 py-2.5 sm:gap-1.5 sm:px-4 sm:py-3 lg:gap-3">
+          <div className="hidden size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground lg:flex">
             <MusicIcon className="size-5" />
           </div>
-          <div className="mr-auto min-w-0">
+          <div className="mr-auto min-w-20">
             <h1 className="text-xs leading-tight text-muted-foreground max-sm:sr-only">
               Chord Creator
             </h1>
@@ -868,23 +901,23 @@ export function App() {
           />
           <Button
             variant="ghost"
-            className="max-sm:size-9 max-sm:px-0"
+            className="hidden max-lg:size-9 max-lg:px-0 sm:inline-flex"
             aria-label="My songs"
             title="Open, rename, back up and delete your songs"
             onClick={showLibrary}
           >
             <FolderOpenIcon />
-            <span className="hidden sm:inline">Songs</span>
+            <span className="hidden lg:inline">Songs</span>
           </Button>
           <Button
             variant="ghost"
-            className="max-sm:size-9 max-sm:px-0"
+            className="hidden max-lg:size-9 max-lg:px-0 sm:inline-flex"
             aria-label="Import MIDI file"
             title="Import a MIDI or song file (or drop one anywhere)"
             onClick={() => fileRef.current?.click()}
           >
             <UploadIcon />
-            <span className="hidden sm:inline">Import</span>
+            <span className="hidden lg:inline">Import</span>
           </Button>
           <MidiKeyboardMenu
             playThrough={playThrough}
@@ -894,14 +927,37 @@ export function App() {
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
-                className="max-sm:size-9 max-sm:px-0"
-                aria-label="Example songs"
+                className="max-lg:size-9 max-lg:px-0"
+                aria-label="Examples and more"
               >
-                <LibraryIcon />
-                <span className="hidden sm:inline">Examples</span>
+                <LibraryIcon className="max-sm:hidden" />
+                <EllipsisVerticalIcon className="sm:hidden" />
+                <span className="hidden lg:inline">Examples</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
+              {/* On phones the header has no room, so these live here. */}
+              <div className="sm:hidden">
+                <DropdownMenuItem onSelect={showLibrary}>
+                  <FolderOpenIcon /> My songs
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => fileRef.current?.click()}>
+                  <UploadIcon /> Import a file
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={!history.canRedo}
+                  onSelect={history.redo}
+                >
+                  <Redo2Icon /> Redo
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => setTheme(isDark ? "light" : "dark")}
+                >
+                  {isDark ? <SunIcon /> : <MoonIcon />}
+                  {isDark ? "Light theme" : "Dark theme"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </div>
               <DropdownMenuLabel>Example songs</DropdownMenuLabel>
               {EXAMPLES.map((ex) => (
                 <DropdownMenuItem
@@ -984,7 +1040,7 @@ export function App() {
           <Button
             onClick={togglePlay}
             variant={player.playing ? "destructive" : "default"}
-            className="sm:w-28"
+            className="sm:w-24 lg:w-28"
             title={
               player.loading
                 ? "Loading instruments… click to cancel"
@@ -1423,37 +1479,48 @@ export function App() {
           </Tabs>
         </div>
       </main>
-      <WelcomeTour
-        open={tourOpen}
-        onOpenChange={setTour}
-        onTryExample={() => loadExample(EXAMPLES[0])}
-      />
-      <ImportDialog
-        pending={pendingImport}
-        song={song}
-        onCancel={() => setPendingImport(null)}
-        onImport={(next, label) => {
-          const name = pendingImport?.filename ?? "Imported song"
-          setPendingImport(null)
-          openNew({ ...next, title: titleFromFile(name) }, { label })
-        }}
-      />
-      <SongLibrary
-        open={libraryOpen}
-        onOpenChange={setLibraryOpen}
-        entries={entries}
-        now={listedAt}
-        currentId={songId}
-        onOpen={openSong}
-        onNew={newSong}
-        onRename={renameSong}
-        onDuplicate={duplicateSong}
-        onDownload={downloadSong}
-        onDelete={deleteSong}
-        onBackup={backupAll}
-        onImport={() => fileRef.current?.click()}
-      />
-      <ShareLinkDialog url={manualShare} onClose={() => setManualShare(null)} />
+      <MountWhen when={tourOpen}>
+        <WelcomeTour
+          open={tourOpen}
+          onOpenChange={setTour}
+          onTryExample={() => loadExample(EXAMPLES[0])}
+        />
+      </MountWhen>
+      <MountWhen when={!!pendingImport}>
+        <ImportDialog
+          pending={pendingImport}
+          song={song}
+          onCancel={() => setPendingImport(null)}
+          onImport={(next, label) => {
+            const name = pendingImport?.filename ?? "Imported song"
+            setPendingImport(null)
+            openNew({ ...next, title: titleFromFile(name) }, { label })
+          }}
+        />
+      </MountWhen>
+      <MountWhen when={libraryOpen}>
+        <SongLibrary
+          open={libraryOpen}
+          onOpenChange={setLibraryOpen}
+          entries={entries}
+          now={listedAt}
+          currentId={songId}
+          onOpen={openSong}
+          onNew={newSong}
+          onRename={renameSong}
+          onDuplicate={duplicateSong}
+          onDownload={downloadSong}
+          onDelete={deleteSong}
+          onBackup={backupAll}
+          onImport={() => fileRef.current?.click()}
+        />
+      </MountWhen>
+      <MountWhen when={!!manualShare}>
+        <ShareLinkDialog
+          url={manualShare}
+          onClose={() => setManualShare(null)}
+        />
+      </MountWhen>
       <Toaster position="bottom-right" />
     </div>
   )

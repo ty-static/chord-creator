@@ -11,4 +11,21 @@ export default defineConfig({
       "@": resolve(import.meta.dirname, "./src"),
     },
   },
+  build: {
+    rolldownOptions: {
+      output: {
+        // React rarely changes, so it gets its own chunk that browsers keep
+        // cached across app updates. (Audio, MIDI import and the dialogs are
+        // split off with dynamic imports and load when first used.)
+        codeSplitting: {
+          groups: [
+            {
+              name: "react",
+              test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/,
+            },
+          ],
+        },
+      },
+    },
+  },
 })

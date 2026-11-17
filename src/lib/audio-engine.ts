@@ -4,14 +4,7 @@
 //
 // Signal flow:  instrument → track bus (volume · mute/solo) ─┬→ master → compressor → out
 //                                                            └→ reverb send → reverb → master
-import {
-  CacheStorage,
-  DrumMachine,
-  Reverb,
-  Scheduler,
-  Soundfont,
-  SplendidGrandPiano,
-} from "smplr"
+import type { Reverb, Scheduler } from "smplr"
 
 import type { TrackName } from "@/lib/arrange"
 import { MIDI_TO_PIECE } from "@/lib/drums"
@@ -75,11 +68,21 @@ const SYNTH: Record<
   drums: { wave: "sine", gain: 0.3, cutoff: 8000, release: 0.1 }, // unused: drums use synthDrumVoice
 }
 
+// smplr is only downloaded when sound is first needed, so the page opens sooner.
+let smplrModule: Promise<typeof import("smplr")> | undefined
+const loadSmplr = () =>
+  (smplrModule ??= import("smplr").catch((err) => {
+    smplrModule = undefined // try again next time
+    throw err
+  }))
+
 // Persist downloaded samples in the browser's Cache Storage so later visits load instantly.
-const storage =
-  typeof caches !== "undefined"
-    ? CacheStorage("chord-creator-samples")
-    : undefined
+let storage: ReturnType<typeof import("smplr").CacheStorage> | undefined
+const sampleStorage = (smplr: typeof import("smplr")) => {
+  if (!storage && typeof caches !== "undefined")
+    storage = smplr.CacheStorage("chord-creator-samples")
+  return storage
+}
 
 const midiToHz = (m: number) => 440 * Math.pow(2, (m - 69) / 12)
 
@@ -119,7 +122,8 @@ export class AudioEngine {
   private ctx: BaseAudioContext | null = null
   private scheduler: Scheduler | undefined
   private master!: GainNode
-  private reverb!: ReturnType<typeof Reverb>
+  private reverb: Promise<ReturnType<typeof Reverb>> | undefined
+  private reverbIn!: GainNode
   private buses!: Record<TrackName, Bus>
   private voices = new Map<string, Promise<Voice>>()
   private live = new Set<Voice>()
@@ -139,23 +143,22 @@ export class AudioEngine {
   context() {
     if (!this.ctx) {
       const ctx = this.options.createContext()
-      if (this.options.immediate)
-        this.scheduler = Scheduler(ctx, { lookaheadMs: 1e9 })
       const comp = ctx.createDynamicsCompressor()
       comp.threshold.value = -14
       comp.ratio.value = 3
       this.master = ctx.createGain()
       this.master.gain.value = 0.9
       this.master.connect(comp).connect(ctx.destination)
-      this.reverb = Reverb(ctx as AudioContext) // works on any BaseAudioContext
-      this.reverb.connect(this.master)
+      // Every send goes into one gain; the reverb is hooked up behind it once
+      // smplr has loaded.
+      this.reverbIn = ctx.createGain()
       this.ctx = ctx
       this.buses = Object.fromEntries(
         TRACKS.map((t) => {
           const input = ctx.createGain()
           const send = ctx.createGain()
           input.connect(this.master)
-          input.connect(send).connect(this.reverb.input)
+          input.connect(send).connect(this.reverbIn)
           return [t, { input, send }]
         })
       ) as Record<TrackName, Bus>
@@ -166,14 +169,33 @@ export class AudioEngine {
 
   async resume() {
     const ctx = this.context() as AudioContext
+    this.effects().catch(() => {}) // reverb also for synth-only songs
     if (ctx.state !== "running") await ctx.resume()
     return ctx
   }
 
+  /** Loads smplr and wires up the reverb (once). */
+  private effects() {
+    const ctx = this.context()
+    this.reverb ??= loadSmplr()
+      .then((smplr) => {
+        if (this.options.immediate)
+          this.scheduler = smplr.Scheduler(ctx, { lookaheadMs: 1e9 })
+        const reverb = smplr.Reverb(ctx as AudioContext) // works on any BaseAudioContext
+        reverb.connect(this.master)
+        this.reverbIn.connect(reverb.input)
+        return reverb
+      })
+      .catch((err) => {
+        this.reverb = undefined // try again next time
+        throw err
+      })
+    return this.reverb
+  }
+
   /** Resolves once the reverb is ready to process audio. */
-  reverbReady() {
-    this.context()
-    return this.reverb.ready()
+  async reverbReady() {
+    await (await this.effects()).ready()
   }
 
   subscribe = (cb: () => void) => {
@@ -234,20 +256,23 @@ export class AudioEngine {
 
     const [lo, hi] = TRACK_RANGE[track]
     const notes = Array.from({ length: hi - lo + 1 }, (_, i) => lo + i)
-    const scheduler = this.scheduler ? { scheduler: this.scheduler } : {}
-    const common = {
-      ...scheduler,
-      destination: this.buses[track].input,
-      ...(storage ? { storage } : {}),
-      volume: TRACK_VOLUME[track],
-      notesToLoad: { notes, fallback: "nearest" as const },
-    }
 
     this.setStatus({ loading: [...this.status.loading, def.label] })
     try {
+      await this.effects()
+      const smplr = await loadSmplr()
+      const storage = sampleStorage(smplr)
+      const scheduler = this.scheduler ? { scheduler: this.scheduler } : {}
+      const common = {
+        ...scheduler,
+        destination: this.buses[track].input,
+        ...(storage ? { storage } : {}),
+        volume: TRACK_VOLUME[track],
+        notesToLoad: { notes, fallback: "nearest" as const },
+      }
       if (def.source.kind === "drums") {
         const { machine, map } = def.source
-        const kit = DrumMachine(ctx, {
+        const kit = smplr.DrumMachine(ctx, {
           ...scheduler,
           instrument: machine,
           destination: this.buses[track].input,
@@ -289,12 +314,12 @@ export class AudioEngine {
 
       const inst =
         def.source.kind === "piano"
-          ? SplendidGrandPiano(ctx, {
+          ? smplr.SplendidGrandPiano(ctx, {
               ...common,
               decayTime: 0.6,
               notesToLoad: { ...common.notesToLoad, velocityRange: [72, 96] },
             })
-          : Soundfont(ctx, {
+          : smplr.Soundfont(ctx, {
               ...common,
               instrument: def.source.name,
               kit: "MusyngKite",

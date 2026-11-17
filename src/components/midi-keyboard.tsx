@@ -37,11 +37,11 @@ export function MidiKeyboardMenu({ playThrough, onPlayThrough }: MenuProps) {
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
-          className="relative max-sm:size-9 max-sm:px-0"
+          className="relative max-lg:size-9 max-lg:px-0"
           aria-label="MIDI keyboard"
         >
           <PianoIcon />
-          <span className="hidden sm:inline">MIDI</span>
+          <span className="hidden lg:inline">MIDI</span>
           {live && (
             <span
               className="absolute top-1.5 right-1.5 size-2 rounded-full bg-emerald-500"

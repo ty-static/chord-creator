@@ -57,7 +57,9 @@ export interface ParsedMidi {
   length: number
 }
 
-export class MidiParseError extends Error {}
+export class MidiParseError extends Error {
+  name = "MidiParseError"
+}
 
 export function parseMidi(buf: ArrayBuffer): ParsedMidi {
   const data = new Uint8Array(buf)
