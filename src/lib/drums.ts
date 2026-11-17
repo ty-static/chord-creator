@@ -28,11 +28,43 @@ export const DRUM_STEPS_PER_BEAT = 4
 export type StepValue = 0 | 1 | 2
 export type DrumPattern = Record<DrumPiece, StepValue[]>
 
+export type FillStyle = "snare" | "toms" | "roll" | "stop"
+
+export const FILL_STYLES: { value: FillStyle; label: string; hint: string }[] =
+  [
+    { value: "snare", label: "Snare fill", hint: "Four rising snare hits" },
+    {
+      value: "toms",
+      label: "Tom run",
+      hint: "Snare and toms over the last two beats",
+    },
+    {
+      value: "roll",
+      label: "Snare roll",
+      hint: "A snare roll that builds over the last two beats",
+    },
+    {
+      value: "stop",
+      label: "Drop out",
+      hint: "The drums stop for the last beat",
+    },
+  ]
+
+/** How many beats each fill takes at the end of a section. */
+const FILL_BEATS: Record<FillStyle, number> = {
+  snare: 1,
+  toms: 2,
+  roll: 2,
+  stop: 1,
+}
+
 export interface DrumSettings {
   enabled: boolean
   pattern: DrumPattern
-  /** Snare fill on the last beat of the song. */
+  /** A fill at the end of the section, every time it plays. */
   fill: boolean
+  /** Which fill (a snare fill when unset). */
+  fillStyle?: FillStyle
   /** Crash cymbal on the very first beat. */
   crashAtStart: boolean
 }
@@ -191,9 +223,11 @@ export function drumHits(
 ): DrumHit[] {
   const hits: DrumHit[] = []
   const totalSteps = Math.round(totalBeats * DRUM_STEPS_PER_BEAT)
+  const fillStyle = settings.fillStyle ?? "snare"
   const fillFrom = settings.fill
-    ? Math.max(0, totalSteps - DRUM_STEPS_PER_BEAT)
+    ? Math.max(0, totalSteps - FILL_BEATS[fillStyle] * DRUM_STEPS_PER_BEAT)
     : Infinity
+  const fillLength = totalSteps - fillFrom
   const midiOf = Object.fromEntries(
     DRUM_PIECES.map((p) => [p.id, p.midi])
   ) as Record<DrumPiece, number>
@@ -202,10 +236,7 @@ export function drumHits(
     const s = step % DRUM_STEPS
     const start = step / DRUM_STEPS_PER_BEAT
     if (step >= fillFrom) {
-      // Snare fill: four 16ths building up, kick under the first one.
-      const n = step - fillFrom
-      hits.push({ midi: midiOf.snare, start, velocity: 78 + n * 14 })
-      if (n === 0) hits.push({ midi: midiOf.kick, start, velocity: 105 })
+      fillHits(fillStyle, step - fillFrom, fillLength, start, midiOf, hits)
       continue
     }
     for (const piece of DRUM_PIECES) {
@@ -223,4 +254,40 @@ export function drumHits(
   if (settings.crashAtStart && totalSteps > 0 && !settings.pattern.crash[0])
     hits.push({ midi: midiOf.crash, start: 0, velocity: VELOCITY.crash[1] })
   return hits
+}
+
+const TOM_RUN = ["snare", "snare", "tom", "tom", "snare", "tom", "tom", "tom"]
+
+/** The hits of step `n` of a fill `length` steps long. */
+function fillHits(
+  style: FillStyle,
+  n: number,
+  length: number,
+  start: number,
+  midiOf: Record<DrumPiece, number>,
+  hits: DrumHit[]
+) {
+  const rise = (from: number, to: number) =>
+    Math.min(
+      127,
+      Math.round(from + ((to - from) * n) / Math.max(1, length - 1))
+    )
+  switch (style) {
+    case "stop":
+      return
+    case "toms": {
+      const piece = TOM_RUN[n % TOM_RUN.length] as DrumPiece
+      hits.push({ midi: midiOf[piece], start, velocity: rise(84, 118) })
+      if (n % 4 === 0) hits.push({ midi: midiOf.kick, start, velocity: 104 })
+      return
+    }
+    case "roll":
+      hits.push({ midi: midiOf.snare, start, velocity: rise(52, 122) })
+      if (n === 0) hits.push({ midi: midiOf.kick, start, velocity: 100 })
+      return
+    default:
+      // Snare fill: 16ths building up, kick under the first one.
+      hits.push({ midi: midiOf.snare, start, velocity: rise(78, 120) })
+      if (n === 0) hits.push({ midi: midiOf.kick, start, velocity: 105 })
+  }
 }

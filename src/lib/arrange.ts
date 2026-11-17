@@ -3,14 +3,20 @@ import {
   type Key,
   type MelodyNote,
   STEPS_PER_BEAT,
-  chordBassMidi,
   voiceChords,
   degreeToMidi,
   melodyBase,
 } from "@/lib/music"
 import type { TrackInstruments } from "@/lib/instruments"
 import type { Mix } from "@/lib/audio-engine"
-import { type DrumSettings, drumHits } from "@/lib/drums"
+import { type BassStyle, bassLine } from "@/lib/bass"
+import {
+  DRUM_PIECES,
+  DRUM_STEPS,
+  DRUM_STEPS_PER_BEAT,
+  type DrumSettings,
+  drumHits,
+} from "@/lib/drums"
 import {
   HUMANIZE_TIME,
   HUMANIZE_VELOCITY,
@@ -43,11 +49,22 @@ export interface Section {
   tacet?: TrackName[]
   /** Chord rhythm for this section only. */
   chordStyle?: ChordStyle
+  /** Bass pattern for this section only. */
+  bassStyle?: BassStyle
   /** Loudness, from 0.5 (soft) to 1.5 (loud). 1 plays as written. */
   energy?: number
   /** Key change in semitones, e.g. 2 lifts a last chorus up a step. */
   transpose?: number
+  /** Get louder over the last bars, into the next section. */
+  buildUp?: boolean
 }
+
+/** Beats a build-up takes at most, and how much louder it ends. */
+export const BUILD_UP_BEATS = 8
+const BUILD_UP_FROM = 0.8
+const BUILD_UP_TO = 1.3
+
+const CRASH = DRUM_PIECES.find((d) => d.id === "crash")!.midi
 
 export const MIN_ENERGY = 0.5
 export const MAX_ENERGY = 1.5
@@ -55,7 +72,12 @@ export const MAX_TRANSPOSE = 6
 
 /** Whether a section is played differently from the rest of the song. */
 export const hasSectionStyle = (s: Section) =>
-  !!s.tacet?.length || !!s.chordStyle || (s.energy ?? 1) !== 1 || !!s.transpose
+  !!s.tacet?.length ||
+  !!s.chordStyle ||
+  !!s.bassStyle ||
+  (s.energy ?? 1) !== 1 ||
+  !!s.transpose ||
+  !!s.buildUp
 
 /** One place in the song's form. The same section can appear in many slots. */
 export interface Slot {
@@ -74,6 +96,8 @@ export interface Song {
   arrangement: Slot[]
   chordStyle: ChordStyle
   bass: boolean
+  /** The bass pattern (roots when unset). */
+  bassStyle?: BassStyle
   instruments: TrackInstruments
   /** Reverb send amount 0..1 (playback only). */
   reverb: number
@@ -85,19 +109,25 @@ export interface Song {
   swing?: number
   /** 0 = exact, 1 = the most timing and velocity variation. */
   humanize?: number
+  /** A crash cymbal wherever the form moves to a different section. */
+  crashOnChange?: boolean
 }
 
 /** What one section needs to become notes. */
-export type Part = Pick<Song, "key" | "chordStyle" | "bass" | "voiceLeading"> &
+export type Part = Pick<
+  Song,
+  "key" | "chordStyle" | "bass" | "bassStyle" | "voiceLeading"
+> &
   Pick<
     Section,
-    "chords" | "melody" | "drums" | "tacet" | "energy" | "transpose"
+    "chords" | "melody" | "drums" | "tacet" | "energy" | "transpose" | "buildUp"
   >
 
 export const partOf = (song: Song, section: Section): Part => ({
   key: song.key,
   chordStyle: section.chordStyle ?? song.chordStyle,
   bass: song.bass,
+  bassStyle: section.bassStyle ?? song.bassStyle,
   voiceLeading: song.voiceLeading,
   chords: section.chords,
   melody: section.melody,
@@ -105,6 +135,7 @@ export const partOf = (song: Song, section: Section): Part => ({
   tacet: section.tacet,
   energy: section.energy,
   transpose: section.transpose,
+  buildUp: section.buildUp,
 })
 
 /** A slot of the form placed on the song's beat grid. */
@@ -148,7 +179,28 @@ export function buildEvents(
 ): NoteEvent[] {
   const cache = new Map<string, NoteEvent[]>()
   const events: NoteEvent[] = []
-  for (const p of layout(song)) {
+  const placed = layout(song)
+  for (const p of placed) {
+    // A crash where the form moves to a new section (not at the very start,
+    // and not if the section already starts with one).
+    const prev = placed[placed.indexOf(p) - 1]
+    if (
+      song.crashOnChange &&
+      layers.drums &&
+      p.section.drums.enabled &&
+      !(p.section.tacet ?? []).includes("drums") &&
+      prev &&
+      prev.section.id !== p.section.id &&
+      !p.section.drums.crashAtStart &&
+      !p.section.drums.pattern.crash[0]
+    )
+      events.push({
+        midi: CRASH,
+        start: p.start,
+        duration: 0.2,
+        velocity: clampVelocity(110 * (p.section.energy ?? 1)),
+        track: "drums",
+      })
     let part = cache.get(p.section.id)
     if (!part) {
       part = partEvents(partOf(song, p.section), layers)
@@ -234,17 +286,18 @@ export function partEvents(
           })
       }
     }
-    if (layers.bass && song.bass) {
-      events.push({
-        midi: chordBassMidi(chord, song.key),
-        start: t,
-        duration: chord.beats * 0.98,
-        velocity: 90,
-        track: "bass",
-      })
-    }
     t += chord.beats
   })
+
+  if (layers.bass && song.bass) {
+    for (const n of bassLine(
+      song.chords,
+      song.key,
+      song.bassStyle ?? "root",
+      kickTimes(song.drums, t)
+    ))
+      events.push({ ...n, track: "bass" })
+  }
 
   if (layers.melody) {
     const base = melodyBase(song.key)
@@ -272,10 +325,29 @@ export function partEvents(
 
   const energy = song.energy ?? 1
   const shift = song.transpose ?? 0
-  if (energy === 1 && !shift) return events
+  if (energy === 1 && !shift && !song.buildUp) return events
+  // A build-up starts a little softer and swells into the next section.
+  const end = t
+  const ramp = Math.min(BUILD_UP_BEATS, end / 2)
+  const swell = (start: number) =>
+    !song.buildUp || start < end - ramp
+      ? 1
+      : BUILD_UP_FROM +
+        ((BUILD_UP_TO - BUILD_UP_FROM) * (start - (end - ramp))) / ramp
   return events.map((e) => ({
     ...e,
     midi: e.track === "drums" ? e.midi : e.midi + shift,
-    velocity: clampVelocity(e.velocity * energy),
+    velocity: clampVelocity(e.velocity * energy * swell(e.start)),
   }))
+}
+
+/** When the kick drum plays in a section, in beats (fills left out). */
+export function kickTimes(drums: DrumSettings, beats: number) {
+  if (!drums.enabled) return []
+  const out: number[] = []
+  const steps = Math.round(beats * DRUM_STEPS_PER_BEAT)
+  for (let step = 0; step < steps; step++)
+    if (drums.pattern.kick[step % DRUM_STEPS])
+      out.push(step / DRUM_STEPS_PER_BEAT)
+  return out
 }

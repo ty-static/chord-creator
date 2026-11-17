@@ -12,7 +12,15 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
+import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   type ChordStyle,
@@ -23,6 +31,7 @@ import {
   type TrackName,
   hasSectionStyle,
 } from "@/lib/arrange"
+import { BASS_STYLES, type BassStyle, bassLabel } from "@/lib/bass"
 import { type Key, keyLabel } from "@/lib/music"
 import type { SetOptions } from "@/lib/use-history"
 
@@ -63,26 +72,40 @@ export function sectionStyleSummary(
     )
   if (section.chordStyle)
     out.push(STYLE_LABELS[section.chordStyle].toLowerCase())
+  if (section.bassStyle && bass)
+    out.push(`${bassLabel(section.bassStyle).toLowerCase()} bass`)
   const energy = section.energy ?? 1
   if (energy !== 1) out.push(energy < 1 ? "softer" : "louder")
   if (section.transpose) out.push(semitones(section.transpose))
+  if (section.buildUp) out.push("build-up")
   return out
 }
 
 type Patch = Partial<
-  Pick<Section, "tacet" | "chordStyle" | "energy" | "transpose" | "drums">
+  Pick<
+    Section,
+    | "tacet"
+    | "chordStyle"
+    | "bassStyle"
+    | "energy"
+    | "transpose"
+    | "buildUp"
+    | "drums"
+  >
 >
 
 export function SectionSettings({
   section,
   musicKey,
   songChordStyle,
+  songBassStyle,
   bass,
   onChange,
 }: {
   section: Section
   musicKey: Key
   songChordStyle: ChordStyle
+  songBassStyle: BassStyle
   /** Whether the song has a bass line at all. */
   bass: boolean
   onChange: (patch: Patch, opts?: SetOptions) => void
@@ -195,6 +218,39 @@ export function SectionSettings({
         </div>
 
         <div className="flex flex-col gap-2">
+          <Label>Bass pattern</Label>
+          <Select
+            value={section.bassStyle ?? "song"}
+            disabled={!bass}
+            onValueChange={(v) =>
+              onChange({
+                bassStyle: v === "song" ? undefined : (v as BassStyle),
+              })
+            }
+          >
+            <SelectTrigger
+              aria-label="Bass pattern for this section"
+              className="w-full"
+              title={
+                bass ? undefined : "The bass line is off for the whole song"
+              }
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="song">
+                Song ({bassLabel(songBassStyle)})
+              </SelectItem>
+              {BASS_STYLES.map((b) => (
+                <SelectItem key={b.value} value={b.value}>
+                  {b.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex flex-col gap-2">
           <Label className="flex justify-between">
             Energy
             <span className="font-mono text-muted-foreground">
@@ -218,6 +274,23 @@ export function SectionSettings({
             <span>Softer</span>
             <span>Louder</span>
           </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          <Label
+            htmlFor="build-up"
+            className="flex flex-col items-start gap-0.5"
+          >
+            Build-up
+            <span className="text-xs font-normal text-muted-foreground">
+              Gets louder over the last bars, into the next section
+            </span>
+          </Label>
+          <Switch
+            id="build-up"
+            checked={!!section.buildUp}
+            onCheckedChange={(on) => onChange({ buildUp: on || undefined })}
+          />
         </div>
 
         <div className="flex flex-col gap-2">
@@ -268,8 +341,10 @@ export function SectionSettings({
               onChange({
                 tacet: undefined,
                 chordStyle: undefined,
+                bassStyle: undefined,
                 energy: undefined,
                 transpose: undefined,
+                buildUp: undefined,
               })
             }
           >

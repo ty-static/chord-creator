@@ -153,6 +153,7 @@ export function MelodyEditor({
 
   const genOpts = () => ({
     density: density / 100,
+    scale: musicKey.scale,
     seed: Math.floor(Math.random() * 1e9),
   })
   const generate = () =>

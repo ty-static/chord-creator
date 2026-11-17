@@ -25,6 +25,8 @@ import {
   DRUM_STEPS_PER_BEAT,
   type DrumPiece,
   type DrumSettings,
+  FILL_STYLES,
+  type FillStyle,
   type StepValue,
   emptyPattern,
   matchingPreset,
@@ -38,6 +40,9 @@ interface Props {
   /** Current playhead position in beats, or null when stopped. */
   playheadBeat: number | null
   onPreview: (midi: number) => void
+  /** Song-wide: a crash wherever the form moves to a new section. */
+  crashOnChange: boolean
+  onCrashOnChange: (on: boolean) => void
 }
 
 const NEXT: Record<StepValue, StepValue> = { 0: 1, 1: 2, 2: 0 }
@@ -47,6 +52,8 @@ export function DrumEditor({
   onChange,
   playheadBeat,
   onPreview,
+  crashOnChange,
+  onCrashOnChange,
 }: Props) {
   const preset = matchingPreset(drums.pattern)
   const set = (p: Partial<DrumSettings>) => onChange({ ...drums, ...p })
@@ -111,19 +118,52 @@ export function DrumEditor({
             <EraserIcon /> Clear
           </Button>
           <div className="ml-auto flex flex-wrap items-center gap-4">
-            <label className="flex items-center gap-2 text-sm">
-              <Switch
-                checked={drums.fill}
-                onCheckedChange={(fill) => set({ fill })}
-              />
-              Fill at end
-            </label>
+            <Select
+              value={drums.fill ? (drums.fillStyle ?? "snare") : "none"}
+              onValueChange={(v) =>
+                set(
+                  v === "none"
+                    ? { fill: false }
+                    : {
+                        fill: true,
+                        fillStyle: v === "snare" ? undefined : (v as FillStyle),
+                      }
+                )
+              }
+            >
+              <SelectTrigger
+                size="sm"
+                className="w-36"
+                aria-label="Fill at the end of this section"
+                title="A fill at the end of this section, every time it plays"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No fill</SelectItem>
+                {FILL_STYLES.map((f) => (
+                  <SelectItem key={f.value} value={f.value} title={f.hint}>
+                    {f.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <label className="flex items-center gap-2 text-sm">
               <Switch
                 checked={drums.crashAtStart}
                 onCheckedChange={(crashAtStart) => set({ crashAtStart })}
               />
               Crash at start
+            </label>
+            <label
+              className="flex items-center gap-2 text-sm"
+              title="For the whole song: a crash wherever the form moves to a different section"
+            >
+              <Switch
+                checked={crashOnChange}
+                onCheckedChange={onCrashOnChange}
+              />
+              Crash on every new section
             </label>
           </div>
         </div>

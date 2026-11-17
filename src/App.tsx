@@ -122,6 +122,7 @@ import { type PlaySettings, usePlayer } from "@/lib/use-player"
 import { cn } from "@/lib/utils"
 import { EXAMPLES, type Example, blankSong } from "@/lib/examples"
 import { Library, type LibraryEntry } from "@/lib/library"
+import { BASS_STYLES, type BassStyle, bassHint } from "@/lib/bass"
 import {
   SongFileError,
   decodeShare,
@@ -277,6 +278,8 @@ export function App() {
       type: guess.type,
       inversion: guess.inversion,
       beats: 4,
+      ...(guess.mode ? { mode: guess.mode } : {}),
+      ...(guess.secondary ? { secondary: true } : {}),
     }
     patchSection({ chords: [...section.chords, chord] })
     toast.success(`Added ${chordName(chord, song.key)}`)
@@ -357,6 +360,8 @@ export function App() {
       song.voiceLeading,
       song.swing,
       song.humanize,
+      song.bassStyle,
+      song.crashOnChange,
     ]
   )
   const playSettings = (
@@ -1150,13 +1155,45 @@ export function App() {
                   onCheckedChange={(voiceLeading) => patch({ voiceLeading })}
                 />
               </div>
-              <div className="flex items-center justify-between">
-                <Label htmlFor="bass">Bass line (chord roots)</Label>
-                <Switch
-                  id="bass"
-                  checked={song.bass}
-                  onCheckedChange={(bass) => patch({ bass })}
-                />
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="bass">Bass line</Label>
+                  <Switch
+                    id="bass"
+                    checked={song.bass}
+                    onCheckedChange={(bass) => patch({ bass })}
+                  />
+                </div>
+                {song.bass && (
+                  <>
+                    <Select
+                      value={song.bassStyle ?? "root"}
+                      onValueChange={(v) =>
+                        patch({
+                          bassStyle:
+                            v === "root" ? undefined : (v as BassStyle),
+                        })
+                      }
+                    >
+                      <SelectTrigger
+                        aria-label="Bass pattern"
+                        className="w-full"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {BASS_STYLES.map((b) => (
+                          <SelectItem key={b.value} value={b.value}>
+                            {b.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      {bassHint(song.bassStyle)}
+                    </p>
+                  </>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -1302,6 +1339,7 @@ export function App() {
                 section={section}
                 musicKey={song.key}
                 songChordStyle={song.chordStyle}
+                songBassStyle={song.bassStyle ?? "root"}
                 bass={song.bass}
                 onChange={patchSection}
               />
@@ -1372,6 +1410,10 @@ export function App() {
               <DrumEditor
                 drums={section.drums}
                 onChange={(drums) => patchSection({ drums })}
+                crashOnChange={!!song.crashOnChange}
+                onCrashOnChange={(on) =>
+                  patch({ crashOnChange: on || undefined })
+                }
                 playheadBeat={player.playing ? localBeat : null}
                 onPreview={(m) =>
                   void player.preview([m], "drums", song.instruments.drums)

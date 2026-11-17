@@ -197,6 +197,27 @@ export interface Chord {
   type: ChordType
   inversion: number // 0-3
   beats: number
+  // Chords outside the key (both optional; a plain chord has neither):
+  /** Borrowed: built from this scale on the same tonic, e.g. ♭VI from minor. */
+  mode?: ScaleId
+  /** Secondary dominant: the V of `degree` (e.g. V/V) rather than its chord. */
+  secondary?: boolean
+}
+
+/** What decides a chord's notes. */
+export type ChordShape = Pick<Chord, "degree" | "type"> &
+  Partial<Pick<Chord, "mode" | "secondary">>
+
+/** Is the chord from outside the key? */
+export const isOutside = (c: ChordShape) => !!c.mode || !!c.secondary
+
+/** Intervals of a dominant-function chord of each type. */
+const DOMINANT: Record<ChordType, number[]> = {
+  triad: [0, 4, 7],
+  seventh: [0, 4, 7, 10],
+  ninth: [0, 4, 7, 10, 14],
+  sus2: [0, 2, 7],
+  sus4: [0, 5, 7],
 }
 
 function chordDegrees(chord: Pick<Chord, "degree" | "type">) {
@@ -215,15 +236,47 @@ function chordDegrees(chord: Pick<Chord, "degree" | "type">) {
   }
 }
 
-/** Degrees (mod 7) belonging to the chord — used for melody generation. */
-export function chordToneClasses(chord: Pick<Chord, "degree" | "type">) {
-  return chordDegrees(chord).map((d) => d % 7)
+/**
+ * Degrees (mod 7) belonging to the chord — used for melody generation. For a
+ * chord outside the key, only the degrees whose notes it really contains
+ * (a melody note on the others would clash), given the key's scale.
+ */
+export function chordToneClasses(chord: ChordShape, scale: ScaleId = "major") {
+  const diatonic = chordDegrees(chord).map((d) => d % 7)
+  if (!isOutside(chord)) return diatonic
+  const key = { root: 0, scale }
+  const pcs = rootPosition(chord, key).map((m) => ((m % 12) + 12) % 12)
+  const tones = SCALES[scale].intervals
+    .map((iv, d) => (pcs.includes(iv) ? d : -1))
+    .filter((d) => d >= 0)
+  return tones.length >= 2 ? tones : diatonic
 }
 
 /** Root-position MIDI notes. */
-function rootPosition(chord: Pick<Chord, "degree" | "type">, key: Key) {
+function rootPosition(chord: ChordShape, key: Key) {
   const base = chordBase(key)
-  return chordDegrees(chord).map((d) => degreeToMidi(d, key, base))
+  if (chord.secondary) {
+    // A dominant chord a fifth above the target degree, in the chord register.
+    let root = degreeToMidi(chord.degree % 7, key, base) + 7
+    if (root >= base + 12) root -= 12
+    return DOMINANT[chord.type].map((i) => root + i)
+  }
+  const scaleKey = chord.mode ? { ...key, scale: chord.mode } : key
+  return chordDegrees(chord).map((d) => degreeToMidi(d, scaleKey, base))
+}
+
+/**
+ * The key to spell a chord's notes in: a borrowed chord takes its scale's
+ * flats (A♭, not G♯, for ♭VI in C), a secondary dominant its own major key.
+ */
+export function chordSpelling(chord: ChordShape, key: Key): Key {
+  if (chord.secondary)
+    return {
+      root: ((rootPosition(chord, key)[0] % 12) + 12) % 12,
+      scale: "major",
+    }
+  if (chord.mode) return { ...key, scale: chord.mode }
+  return key
 }
 
 export function chordMidi(chord: Chord, key: Key) {
@@ -237,17 +290,18 @@ export function chordBassMidi(chord: Chord, key: Key) {
   return rootPosition(chord, key)[0] - 12
 }
 
-function qualityOf(chord: Pick<Chord, "degree" | "type">, key: Key) {
+function qualityOf(chord: ChordShape, key: Key) {
   const n = rootPosition(chord, key).map((m, _i, arr) => m - arr[0])
   return n
 }
 
 export function chordName(
-  chord: Pick<Chord, "degree" | "type" | "inversion">,
+  chord: ChordShape & Pick<Chord, "inversion">,
   key: Key
 ) {
   const notes = rootPosition(chord, key)
-  const root = noteName(notes[0], key)
+  const spell = chordSpelling(chord, key)
+  const root = noteName(notes[0], spell)
   const iv = qualityOf(chord, key)
   let suffix: string
 
@@ -294,17 +348,31 @@ export function chordName(
   let name = root + suffix
   if (chord.inversion > 0) {
     const inv = chordMidi({ ...chord, id: "", beats: 0 } as Chord, key)
-    name += `/${noteName(inv[0], key)}`
+    name += `/${noteName(inv[0], spell)}`
   }
   return name
 }
 
 const NUMERALS = ["I", "II", "III", "IV", "V", "VI", "VII"]
 
-export function romanNumeral(chord: Pick<Chord, "degree" | "type">, key: Key) {
+const SECONDARY_SUFFIX: Record<ChordType, string> = {
+  triad: "",
+  seventh: "7",
+  ninth: "9",
+  sus2: "sus2",
+  sus4: "sus4",
+}
+
+export function romanNumeral(chord: ChordShape, key: Key): string {
+  if (chord.secondary)
+    return `V${SECONDARY_SUFFIX[chord.type]}/${romanNumeral(
+      { degree: chord.degree, type: "triad" },
+      key
+    )}`
   const iv = qualityOf(
     {
       degree: chord.degree,
+      mode: chord.mode,
       type:
         chord.type === "triad" || chord.type.startsWith("sus")
           ? "triad"
@@ -312,7 +380,18 @@ export function romanNumeral(chord: Pick<Chord, "degree" | "type">, key: Key) {
     },
     key
   )
-  const base = NUMERALS[chord.degree]
+  // A borrowed chord's root may be lowered or raised: ♭VI, ♭II…
+  // (In a minor key the raised 6th and 7th of harmonic and melodic minor are
+  // normal and written without one: V, vii°.)
+  const raisedMinor =
+    SCALES[key.scale].minor &&
+    (chord.mode === "harmonicMinor" || chord.mode === "melodicMinor")
+  const shift =
+    chord.mode && !raisedMinor
+      ? SCALES[chord.mode].intervals[chord.degree] -
+        SCALES[key.scale].intervals[chord.degree]
+      : 0
+  const base = (shift < 0 ? "♭" : shift > 0 ? "♯" : "") + NUMERALS[chord.degree]
   if (chord.type === "sus2" || chord.type === "sus4")
     return `${base}${chord.type}`
   const third = iv[1]
@@ -330,6 +409,153 @@ export function romanNumeral(chord: Pick<Chord, "degree" | "type">, key: Key) {
   if (chord.type === "ninth")
     r += maj7 ? (third === 4 ? "maj9" : "(maj9)") : "9"
   return r
+}
+
+// ---------------------------------------------------------------- Outside the key
+
+/** Pitch classes (0–11) a chord sounds. */
+export function chordPitchClasses(chord: ChordShape, key: Key) {
+  return rootPosition(chord, key).map((m) => ((m % 12) + 12) % 12)
+}
+
+export interface OutsideChord {
+  chord: ChordShape
+  group: "secondary" | "borrowed"
+  /** What it is, in a few words. */
+  hint: string
+}
+
+const BORROWED: Record<"major" | "minor", [number, ScaleId, string][]> = {
+  major: [
+    [3, "minor", "Minor iv, borrowed from the minor key: wistful"],
+    [5, "minor", "♭VI, borrowed from the minor key: big and dramatic"],
+    [6, "minor", "♭VII, borrowed from the minor key: rock and anthems"],
+    [2, "minor", "♭III, borrowed from the minor key"],
+    [1, "phrygian", "Neapolitan ♭II: dark, leads strongly to V"],
+  ],
+  minor: [
+    [4, "harmonicMinor", "Major V, from harmonic minor: pulls hard to i"],
+    [6, "harmonicMinor", "Leading-tone vii°, from harmonic minor"],
+    [3, "dorian", "Major IV, from Dorian: brighter, soulful"],
+    [1, "phrygian", "Neapolitan ♭II: dark, leads strongly to V"],
+    [0, "major", "Major I (Picardy third): a bright ending"],
+  ],
+}
+
+/**
+ * The most useful chords from outside the key: secondary dominants (as
+ * sevenths) and chords borrowed from the parallel key. Chords that turn out
+ * to be in the key anyway (e.g. V in harmonic minor) are left out.
+ */
+export function outsideChords(key: Key): OutsideChord[] {
+  const minor = SCALES[key.scale].minor
+  const inKey = new Set(SCALES[key.scale].intervals)
+  const outside = (c: ChordShape) =>
+    chordPitchClasses(c, { root: 0, scale: key.scale }).some(
+      (pc) => !inKey.has(pc)
+    )
+  const out: OutsideChord[] = []
+  const targets = minor ? [2, 3, 4, 5, 6] : [1, 2, 3, 4, 5]
+  for (const degree of targets) {
+    const chord: ChordShape = { degree, type: "seventh", secondary: true }
+    const target = romanNumeral({ degree, type: "triad" }, key)
+    if (outside(chord))
+      out.push({
+        chord,
+        group: "secondary",
+        hint: `Secondary dominant: leads into ${target}`,
+      })
+  }
+  for (const [degree, mode, hint] of BORROWED[minor ? "minor" : "major"]) {
+    if (mode === key.scale) continue
+    const chord: ChordShape = { degree, type: "triad", mode }
+    if (outside(chord)) out.push({ chord, group: "borrowed", hint })
+  }
+  return out
+}
+
+/** Where a borrowed chord likes to go, by "degree:mode". */
+const BORROWED_NEXT: Record<string, ChordShape[]> = {
+  "5:minor": [
+    { degree: 6, type: "triad", mode: "minor" },
+    { degree: 4, type: "triad" },
+    { degree: 0, type: "triad" },
+  ],
+  "6:minor": [
+    { degree: 0, type: "triad" },
+    { degree: 3, type: "triad" },
+  ],
+  "3:minor": [
+    { degree: 0, type: "triad" },
+    { degree: 4, type: "triad" },
+  ],
+  "2:minor": [
+    { degree: 5, type: "triad", mode: "minor" },
+    { degree: 3, type: "triad" },
+  ],
+  "1:phrygian": [
+    { degree: 4, type: "triad" },
+    { degree: 0, type: "triad" },
+  ],
+  "4:harmonicMinor": [
+    { degree: 0, type: "triad" },
+    { degree: 5, type: "triad" },
+  ],
+  "6:harmonicMinor": [{ degree: 0, type: "triad" }],
+  "3:dorian": [
+    { degree: 0, type: "triad" },
+    { degree: 4, type: "triad", mode: "harmonicMinor" },
+  ],
+  "0:major": [{ degree: 3, type: "triad" }],
+}
+
+const same = (a: ChordShape, b: ChordShape) =>
+  a.degree === b.degree &&
+  a.type === b.type &&
+  (a.mode ?? null) === (b.mode ?? null) &&
+  !!a.secondary === !!b.secondary
+
+/**
+ * A few good chords to play after `last`, best first, from common
+ * progressions. After an ordinary chord, one suggestion adds colour: the
+ * secondary dominant that leads into the top pick.
+ */
+export function suggestNext(last: ChordShape | undefined, key: Key) {
+  const minor = SCALES[key.scale].minor
+  const triad = (degree: number): ChordShape => ({ degree, type: "triad" })
+  let picks: ChordShape[]
+  if (!last) picks = (minor ? [0, 5, 3] : [0, 5, 3]).map(triad)
+  else if (last.secondary) picks = [triad(last.degree)]
+  else if (last.mode)
+    picks = BORROWED_NEXT[`${last.degree}:${last.mode}`] ?? [triad(0)]
+  else {
+    // Most common next degrees first.
+    const counts = new Map<number, number>()
+    for (const d of TRANSITIONS[last.degree] ?? [0])
+      counts.set(d, (counts.get(d) ?? 0) + 1)
+    picks = [...counts]
+      .sort((a, b) => b[1] - a[1])
+      .map(([d]) => triad(d))
+      .slice(0, 3)
+    if (minor && last.degree !== 4 && !picks.some((p) => p.degree === 4))
+      picks.push({ degree: 4, type: "triad", mode: "harmonicMinor" })
+    const lead = picks.find((p) => p.degree !== 0 && !p.mode)
+    if (lead)
+      picks.push({ degree: lead.degree, type: "seventh", secondary: true })
+  }
+  const offered = new Set(
+    outsideChords(key).map((o) => JSON.stringify(o.chord))
+  )
+  return picks
+    .filter((p) => !last || !same(p, last))
+    .filter(
+      (p) =>
+        !isOutside(p) ||
+        offered.has(JSON.stringify(p)) ||
+        // A secondary dominant offered as a seventh also counts as a triad.
+        offered.has(JSON.stringify({ ...p, type: "seventh" }))
+    )
+    .slice(0, 4)
 }
 
 // ---------------------------------------------------------------- Presets
@@ -468,6 +694,8 @@ export function chordAtStep(chords: Chord[], step: number) {
 export interface MelodyOptions {
   density: number // 0..1
   seed: number
+  /** The key's scale, so chords outside it get the right chord tones. */
+  scale?: ScaleId
 }
 
 export function generateMelody(
@@ -502,7 +730,7 @@ export function generateMelody(
 
     const at = chordAtStep(chords, start)!
     const strong = at.offset === 0 || start % STEPS_PER_BEAT === 0
-    const tones = chordToneClasses(at.chord)
+    const tones = chordToneClasses(at.chord, opts.scale)
     const isLast = i === starts.length - 1
 
     const candidates: { item: number; w: number }[] = []

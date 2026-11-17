@@ -23,6 +23,7 @@ import {
   GripVerticalIcon,
   PlusIcon,
   ShuffleIcon,
+  SparklesIcon,
   Trash2Icon,
   Volume2Icon,
 } from "lucide-react"
@@ -57,8 +58,13 @@ import {
   chordsFromPreset,
   keyLabel,
   noteNameWithOctave,
+  type ChordShape,
+  chordSpelling,
+  isOutside,
+  outsideChords,
   randomProgression,
   romanNumeral,
+  suggestNext,
   uid,
   type Voicing,
 } from "@/lib/music"
@@ -111,17 +117,19 @@ export function ChordEditor({
     if (from >= 0 && to >= 0) onChange(arrayMove(chords, from, to))
   }
 
-  const addChord = (degree: number, type: ChordType = "triad") => {
-    const chord: Chord = { id: uid(), degree, type, inversion: 0, beats: 4 }
+  const addChord = (shape: ChordShape) => {
+    const chord: Chord = { id: uid(), ...shape, inversion: 0, beats: 4 }
     onChange([...chords, chord])
     onPreview(chordMidi(chord, musicKey))
   }
+  const outside = outsideChords(musicKey)
+  const suggestions = suggestNext(chords[chords.length - 1], musicKey)
 
   return (
     <div className="flex flex-col gap-4">
       <Card>
         <CardHeader className="max-sm:flex max-sm:flex-col">
-          <CardTitle>Diatonic chords — {keyLabel(musicKey)}</CardTitle>
+          <CardTitle>Chords in {keyLabel(musicKey)}</CardTitle>
           <CardDescription>
             Click a chord to add it to your progression.
           </CardDescription>
@@ -165,7 +173,7 @@ export function ChordEditor({
                   key={degree}
                   variant="secondary"
                   className="h-auto flex-col gap-0.5 py-3"
-                  onClick={() => addChord(degree)}
+                  onClick={() => addChord(chord)}
                 >
                   <span className="text-base font-semibold">
                     {chordName(chord, musicKey)}
@@ -177,6 +185,62 @@ export function ChordEditor({
               )
             })}
           </div>
+          {suggestions.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 flex items-center gap-1 text-xs text-muted-foreground">
+                <SparklesIcon className="size-3.5" />
+                {chords.length ? "Next" : "Start with"}
+              </span>
+              {suggestions.map((c) => (
+                <PaletteChip
+                  key={JSON.stringify(c)}
+                  chord={c}
+                  musicKey={musicKey}
+                  onAdd={addChord}
+                  title={
+                    isOutside(c)
+                      ? outside.find(
+                          (o) =>
+                            o.chord.degree === c.degree &&
+                            o.chord.mode === c.mode &&
+                            !!o.chord.secondary === !!c.secondary
+                        )?.hint
+                      : "Often comes next"
+                  }
+                />
+              ))}
+            </div>
+          )}
+          {outside.length > 0 && (
+            <div className="mt-4 flex flex-col gap-2 border-t pt-3">
+              <p className="text-xs font-medium text-muted-foreground">
+                Outside the key
+              </p>
+              {(["secondary", "borrowed"] as const).map((group) => (
+                <div
+                  key={group}
+                  className="flex flex-wrap items-center gap-1.5"
+                >
+                  <span className="w-full text-xs text-muted-foreground sm:w-36">
+                    {group === "secondary"
+                      ? "Secondary dominants"
+                      : "Borrowed chords"}
+                  </span>
+                  {outside
+                    .filter((o) => o.group === group)
+                    .map((o) => (
+                      <PaletteChip
+                        key={JSON.stringify(o.chord)}
+                        chord={o.chord}
+                        musicKey={musicKey}
+                        onAdd={addChord}
+                        title={o.hint}
+                      />
+                    ))}
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -281,7 +345,10 @@ export function ChordEditor({
                               variant="secondary"
                               className="font-mono"
                             >
-                              {noteNameWithOctave(m, musicKey)}
+                              {noteNameWithOctave(
+                                m,
+                                chordSpelling(chord, musicKey)
+                              )}
                             </Badge>
                           ))}
                         </div>
@@ -293,15 +360,33 @@ export function ChordEditor({
                         >
                           <Field label="Degree">
                             <Select
-                              value={String(chord.degree)}
+                              value={
+                                isOutside(chord)
+                                  ? "outside"
+                                  : String(chord.degree)
+                              }
                               onValueChange={(v) =>
-                                update(chord.id, { degree: Number(v) })
+                                v !== "outside" &&
+                                update(chord.id, {
+                                  degree: Number(v),
+                                  mode: undefined,
+                                  secondary: undefined,
+                                })
                               }
                             >
                               <SelectTrigger size="sm" className="w-full">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
+                                {isOutside(chord) && (
+                                  <SelectItem value="outside">
+                                    {romanNumeral(chord, musicKey)} ·{" "}
+                                    {chordName(
+                                      { ...chord, inversion: 0 },
+                                      musicKey
+                                    )}
+                                  </SelectItem>
+                                )}
                                 {Array.from({ length: 7 }, (_, d) => (
                                   <SelectItem key={d} value={String(d)}>
                                     {romanNumeral(
@@ -435,7 +520,10 @@ export function ChordEditor({
             })}
             <button
               type="button"
-              onClick={() => addChord(0)}
+              onClick={() =>
+                addChord(suggestions[0] ?? { degree: 0, type: "triad" })
+              }
+              title="Adds the top suggestion"
               className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed text-sm text-muted-foreground transition-colors hover:border-primary hover:text-foreground sm:min-h-40"
             >
               <PlusIcon className="size-5" />
@@ -496,5 +584,35 @@ function Field({
       <Label className="text-xs text-muted-foreground">{label}</Label>
       {children}
     </div>
+  )
+}
+
+/** A small chord button in the palette: name and numeral. */
+function PaletteChip({
+  chord,
+  musicKey,
+  onAdd,
+  title,
+}: {
+  chord: ChordShape
+  musicKey: Key
+  onAdd: (chord: ChordShape) => void
+  title?: string
+}) {
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="h-auto gap-1.5 px-2.5 py-1"
+      title={title}
+      onClick={() => onAdd(chord)}
+    >
+      <span className="font-semibold">
+        {chordName({ ...chord, inversion: 0 }, musicKey)}
+      </span>
+      <span className="text-xs text-muted-foreground">
+        {romanNumeral(chord, musicKey)}
+      </span>
+    </Button>
   )
 }

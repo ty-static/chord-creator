@@ -98,8 +98,10 @@ export function copySection(section: Section, name: string): Section {
     drums: structuredClone(section.drums),
     tacet: section.tacet && [...section.tacet],
     chordStyle: section.chordStyle,
+    bassStyle: section.bassStyle,
     energy: section.energy,
     transpose: section.transpose,
+    buildUp: section.buildUp,
   }
 }
 

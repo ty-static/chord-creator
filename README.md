@@ -14,6 +14,10 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   drag, type the letters, loop one part, or split off a variation.
 - **Chords** — diatonic palette, presets, randomize, triads/7ths/9ths/sus,
   inversions, drag to reorder, optional automatic voice leading.
+- **Chords outside the key** — secondary dominants (V7/V…), borrowed chords
+  (iv, ♭VI, ♭VII, ♭III, the Neapolitan ♭II; V, IV and a Picardy I in minor),
+  and "next chord" suggestions from common progressions. A MIDI keyboard
+  recognises them too.
 - **Melody** — piano-roll editor (draw, drag, resize, keyboard nudging),
   generator with density control, per-bar regenerate / repeat motif
   (exact or following the chords), and note locking.
@@ -36,6 +40,12 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
 - **Section style** — per section: which tracks play (no drums in the intro,
   melody only in the chorus…), its own chord rhythm, an energy level, and a
   key change (lift the last chorus up a step).
+- **Bass patterns** — roots, root–fifth, octaves, a walking line that steps
+  into the next chord, a syncopated groove, or following the kick drum. Set
+  for the song and changed per section.
+- **Fills and transitions** — snare fill, tom run, snare roll or drop-out at
+  the end of a section; a crash on every new section; and a build-up that
+  swells into the next section.
 - **Swing and humanize** — a shuffle feel and small, repeatable changes in
   timing and loudness, so playback and exports sound less mechanical.
 - **My songs** — every song is saved in the browser as you work. Open,
@@ -64,6 +74,7 @@ Built with Vite, React 19, TypeScript, Tailwind CSS v4 and
 | `src/lib/music.ts`        | Keys, scales, chords, melody generator, bar tools, voice leading          |
 | `src/lib/arrange.ts`      | Song model; lays out the form and turns it into timed note events         |
 | `src/lib/sections.ts`     | Section and form editing, form letters, saved-song migration              |
+| `src/lib/bass.ts`         | Bass line patterns                                                        |
 | `src/lib/feel.ts`         | Swing and humanize timing                                                 |
 | `src/lib/drums.ts`        | Drum pieces, presets and pattern expansion                                |
 | `src/lib/audio-engine.ts` | Web Audio engine: sampled instruments, buses, mixer, reverb               |

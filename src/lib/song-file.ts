@@ -12,11 +12,14 @@ import {
   TRACK_NAMES,
 } from "@/lib/arrange"
 import { DEFAULT_MIX, type Mix } from "@/lib/audio-engine"
+import { BASS_STYLES, type BassStyle } from "@/lib/bass"
 import {
   DEFAULT_DRUMS,
   DRUM_PIECES,
   DRUM_STEPS,
   type DrumPattern,
+  FILL_STYLES,
+  type FillStyle,
   type DrumSettings,
   type StepValue,
   emptyPattern,
@@ -92,6 +95,8 @@ const id = (x: unknown) =>
 
 const CHORD_TYPES: ChordType[] = ["triad", "seventh", "ninth", "sus2", "sus4"]
 const STYLES: ChordStyle[] = ["block", "pulse", "arpeggio"]
+const isBassStyle = (x: unknown): x is BassStyle =>
+  BASS_STYLES.some((b) => b.value === x)
 
 function chord(x: unknown): Chord | null {
   if (!isObj(x) || typeof x.degree !== "number") return null
@@ -103,6 +108,11 @@ function chord(x: unknown): Chord | null {
       : "triad",
     inversion: int(x.inversion, 0, 0, 3),
     beats: int(x.beats, 4, 1, 32),
+    ...(x.secondary === true
+      ? { secondary: true }
+      : (x.mode as string) in SCALES
+        ? { mode: x.mode as ScaleId }
+        : {}),
   }
 }
 
@@ -139,6 +149,9 @@ function drums(x: unknown): DrumSettings {
     pattern: isObj(x.pattern) ? pattern(x.pattern) : DEFAULT_DRUMS.pattern,
     fill: bool(x.fill, DEFAULT_DRUMS.fill),
     crashAtStart: bool(x.crashAtStart, DEFAULT_DRUMS.crashAtStart),
+    ...(FILL_STYLES.some((f) => f.value === x.fillStyle && f.value !== "snare")
+      ? { fillStyle: x.fillStyle as FillStyle }
+      : {}),
   }
 }
 
@@ -177,8 +190,12 @@ function section(x: unknown, index: number): Section | null {
     ...(STYLES.includes(x.chordStyle as ChordStyle)
       ? { chordStyle: x.chordStyle as ChordStyle }
       : {}),
+    ...(isBassStyle(x.bassStyle) && x.bassStyle !== undefined
+      ? { bassStyle: x.bassStyle }
+      : {}),
     ...(energy !== 1 ? { energy: Math.round(energy * 100) / 100 } : {}),
     ...(transpose ? { transpose } : {}),
+    ...(x.buildUp === true ? { buildUp: true } : {}),
   }
 }
 
@@ -275,12 +292,16 @@ export function normalizeSong(raw: unknown): Song {
       ? (raw.chordStyle as ChordStyle)
       : "block",
     bass: bool(raw.bass, true),
+    ...(isBassStyle(raw.bassStyle) && raw.bassStyle !== "root"
+      ? { bassStyle: raw.bassStyle }
+      : {}),
     instruments: instruments(raw.instruments),
     reverb: num(raw.reverb, 0.25, 0, 1),
     mix: mix(raw.mix),
     voiceLeading: bool(raw.voiceLeading, false),
     ...feel("swing", raw.swing),
     ...feel("humanize", raw.humanize),
+    ...(raw.crashOnChange === true ? { crashOnChange: true } : {}),
   }
 }
 
@@ -355,8 +376,10 @@ function compact(song: Song) {
       name: s.name,
       tacet: s.tacet,
       chordStyle: s.chordStyle,
+      bassStyle: s.bassStyle,
       energy: s.energy,
       transpose: s.transpose,
+      buildUp: s.buildUp,
       drums: s.drums,
       ...notesOf(s),
     })),
@@ -371,6 +394,8 @@ function notesOf({ chords, melody }: Section) {
       type: c.type,
       inversion: c.inversion,
       beats: c.beats,
+      mode: c.mode,
+      secondary: c.secondary,
     })),
     melody: melody.map((n) => ({
       start: n.start,

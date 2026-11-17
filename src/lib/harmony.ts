@@ -2,13 +2,16 @@
 // file import and live MIDI keyboard input.
 
 import {
+  type ChordShape,
   type ChordType,
   type Key,
   MELODY_RANGE,
   SCALES,
+  chordPitchClasses,
   chordToneClasses,
   degreeToMidi,
   melodyBase,
+  outsideChords,
 } from "@/lib/music"
 
 const mod = (n: number, m: number) => ((n % m) + m) % m
@@ -21,6 +24,8 @@ export function degreePc(key: Key, degree: number) {
 export interface ChordGuess {
   degree: number
   type: ChordType
+  mode?: ChordShape["mode"]
+  secondary?: boolean
   inversion: number
   /** Share of the sounding notes (by weight) that belong to the chord, 0..1. */
   fit: number
@@ -36,7 +41,9 @@ export function guessChord(
   weights: number[],
   key: Key,
   bassPc: number | null,
-  types: ChordType[] = ["triad", "seventh"]
+  types: ChordType[] = ["triad", "seventh"],
+  /** Also consider chords from outside the key (secondary dominants, borrowed). */
+  outside = false
 ): ChordGuess | null {
   const total = weights.reduce((a, b) => a + b, 0)
   if (total <= 0) return null
@@ -68,6 +75,28 @@ export function guessChord(
       }
     }
   }
+  if (!outside) return best
+  // An outside chord must explain the notes clearly better than any chord
+  // in the key, so in-key playing never turns chromatic by accident.
+  for (const { chord } of outsideChords(key))
+    for (const type of types) {
+      const shape: ChordShape = { ...chord, type }
+      const pcs = chordPitchClasses(shape, key)
+      const covered = [...new Set(pcs)].reduce((s, pc) => s + weights[pc], 0)
+      const fit = covered / total
+      const missing = pcs.filter((pc) => weights[pc] <= 0).length
+      let score = fit - 0.12 * missing - 0.06
+      if (bassPc === pcs[0]) score += 0.2
+      if (type !== "triad") score -= 0.04
+      if (best && score <= best.score) continue
+      const idx = bassPc === null ? -1 : pcs.indexOf(bassPc)
+      best = {
+        ...shape,
+        inversion: idx > 0 ? Math.min(idx, pcs.length - 1) : 0,
+        fit,
+        score,
+      }
+    }
   return best
 }
 
@@ -87,12 +116,13 @@ export function chordFromPitches(pitches: number[], key: Key) {
       score: 1,
     }
   }
-  return guessChord(weights, key, mod(lowest, 12), [
-    "triad",
-    "seventh",
-    "sus2",
-    "sus4",
-  ])
+  return guessChord(
+    weights,
+    key,
+    mod(lowest, 12),
+    ["triad", "seventh", "sus2", "sus4"],
+    true
+  )
 }
 
 /** Nearest scale degree to a MIDI pitch, counted from the melody tonic (may be out of range). */
