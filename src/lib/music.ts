@@ -91,6 +91,10 @@ export const SCALES: Record<
 export interface Key {
   root: number
   scale: ScaleId
+  /** Overrides the chord register's tonic (see chordBase). Only set by
+   *  sectionKey, so a section's key change keeps the song's register;
+   *  never saved. */
+  base?: number
 }
 
 const SHARP_NAMES = [
@@ -160,7 +164,21 @@ export function keyLabel(key: Key) {
 
 /** MIDI note of the key's tonic used as degree 0 for chords (around C3). */
 export function chordBase(key: Key) {
-  return 48 + key.root - (key.root >= 7 ? 12 : 0)
+  return key.base ?? 48 + key.root - (key.root >= 7 ? 12 : 0)
+}
+
+/**
+ * The key a section plays in after a key change of `transpose` semitones.
+ * Notes built in it sound exactly `transpose` semitones from the song's
+ * (same register), but are named and spelled in the new key.
+ */
+export function sectionKey(key: Key, transpose = 0): Key {
+  if (!transpose) return key
+  return {
+    root: (((key.root + transpose) % 12) + 12) % 12,
+    scale: key.scale,
+    base: chordBase(key) + transpose,
+  }
 }
 
 /** MIDI note of the key's tonic used as degree 0 for the melody (around C4). */

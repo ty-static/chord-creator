@@ -40,7 +40,6 @@ import { sectionColor } from "@/components/section-style"
 import { SongForm } from "@/components/song-form"
 import {
   SectionSettings,
-  sectionKey,
   sectionStyleSummary,
 } from "@/components/section-settings"
 import { SongTitle } from "@/components/song-title"
@@ -84,6 +83,7 @@ import {
   type TrackName,
   type Section,
   buildEvents,
+  keyChanges,
   layout,
   placedAt,
 } from "@/lib/arrange"
@@ -102,6 +102,7 @@ import {
   uid,
   voiceChords,
   keyLabel,
+  sectionKey,
   keySignature,
   noteName,
   scaleNotes,
@@ -237,8 +238,9 @@ export function App() {
   const patchSection = (p: Partial<Omit<Section, "id">>, opts?: SetOptions) =>
     history.set((s) => updateSection(s, section.id, p), opts)
   const anyDrums = song.sections.some((s) => s.drums.enabled)
-  /** The selected section's key change, for previews while editing. */
-  const shift = section.transpose ?? 0
+  /** The key the selected section plays in (after any key change): the
+   *  editors show and build notes in it. */
+  const editKey = sectionKey(song.key, section.transpose)
 
   // Welcome tour: shown automatically on the first visit.
   const [tourOpen, setTourOpen] = React.useState(
@@ -255,7 +257,11 @@ export function App() {
       new Map(
         song.sections.map((s) => [
           s.id,
-          voiceChords(s.chords, song.key, song.voiceLeading),
+          voiceChords(
+            s.chords,
+            sectionKey(song.key, s.transpose),
+            song.voiceLeading
+          ),
         ])
       ),
     [song.sections, song.key, song.voiceLeading]
@@ -298,7 +304,7 @@ export function App() {
   const chordNotesRef = React.useRef<number[]>([])
 
   const addChordFromKeys = (pitches: number[]) => {
-    const guess = chordFromPitches(pitches, song.key)
+    const guess = chordFromPitches(pitches, editKey)
     if (!guess) return
     const chord: Chord = {
       id: uid(),
@@ -310,7 +316,7 @@ export function App() {
       ...(guess.secondary ? { secondary: true } : {}),
     }
     patchSection({ chords: [...section.chords, chord] })
-    toast.success(`Added ${chordName(chord, song.key)}`)
+    toast.success(`Added ${chordName(chord, editKey)}`)
   }
 
   const onKeyboardNote = React.useEffectEvent(async (e: MidiNoteEvent) => {
@@ -452,6 +458,9 @@ export function App() {
       chords: p.section.chords.map((c, i) =>
         v?.[i] ? { ...c, inversion: v[i].inversion } : c
       ),
+      ...(p.section.transpose
+        ? { musicKey: sectionKey(song.key, p.section.transpose) }
+        : {}),
     }
   })
 
@@ -841,6 +850,7 @@ export function App() {
         bpm: song.bpm,
         title: song.title,
         keySig: keySignature(song.key),
+        keyChanges: keyChanges(song.key, placed),
         markers:
           song.arrangement.length > 1
             ? placed.map((p) => ({
@@ -1389,6 +1399,7 @@ export function App() {
                 notes={sectionStyleSummary(section, {
                   bass: song.bass,
                   anyDrums,
+                  musicKey: song.key,
                 })}
               />
               <SectionSettings
@@ -1406,10 +1417,10 @@ export function App() {
                 {Math.abs(section.transpose) === 1 ? "semitone" : "semitones"}{" "}
                 {section.transpose > 0 ? "higher" : "lower"}, in{" "}
                 <span className="font-medium text-foreground">
-                  {keyLabel(sectionKey(song.key, section.transpose))}
+                  {keyLabel(editKey)}
                 </span>
-                . You write it in {keyLabel(song.key)}, like playing with a
-                capo.
+                , so the chords and notes below are shown in that key. The song
+                is in {keyLabel(song.key)}.
               </p>
             )}
             <TabsContent value="chords" className="mt-2">
@@ -1422,7 +1433,7 @@ export function App() {
               <ChordEditor
                 voicings={voicings}
                 voiceLeading={song.voiceLeading}
-                musicKey={song.key}
+                musicKey={editKey}
                 chords={section.chords}
                 onChange={(chords) => {
                   // Trim melody notes that now fall past the end of the progression.
@@ -1437,28 +1448,20 @@ export function App() {
                 }}
                 activeChordId={activeChordId}
                 onPreview={(m) =>
-                  void player.preview(
-                    m.map((x) => x + shift),
-                    "chords",
-                    song.instruments.chords
-                  )
+                  void player.preview(m, "chords", song.instruments.chords)
                 }
               />
             </TabsContent>
             <TabsContent value="melody" className="mt-2">
               <MelodyEditor
-                musicKey={song.key}
+                musicKey={editKey}
                 key={section.id}
                 chords={section.chords}
                 melody={section.melody}
                 onChange={(melody) => patchSection({ melody })}
                 playheadBeat={localBeat}
                 onPreview={(m) =>
-                  void player.preview(
-                    [m + shift],
-                    "melody",
-                    song.instruments.melody
-                  )
+                  void player.preview([m], "melody", song.instruments.melody)
                 }
               />
             </TabsContent>

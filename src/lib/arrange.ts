@@ -5,7 +5,9 @@ import {
   STEPS_PER_BEAT,
   voiceChords,
   degreeToMidi,
+  keySignature,
   melodyBase,
+  sectionKey,
 } from "@/lib/music"
 import type { TrackInstruments } from "@/lib/instruments"
 import type { Mix } from "@/lib/audio-engine"
@@ -149,6 +151,24 @@ export interface Placed {
 }
 
 /** The form laid out in time. Slots whose section is gone are skipped. */
+/** A key signature wherever the key changes between placed sections
+ *  (for MIDI export), each from the first beat in the new key. */
+export function keyChanges(
+  key: Key,
+  placed: Pick<Placed, "start" | "beats" | "section">[]
+) {
+  const out: { beat: number; sf: number; minor: boolean }[] = []
+  let prev = 0
+  for (const p of placed) {
+    if (!p.beats) continue
+    const t = p.section.transpose ?? 0
+    if (t !== prev)
+      out.push({ beat: p.start, ...keySignature(sectionKey(key, t)) })
+    prev = t
+  }
+  return out
+}
+
 export function layout(song: Song): Placed[] {
   const byId = new Map(song.sections.map((s) => [s.id, s]))
   const out: Placed[] = []

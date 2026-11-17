@@ -3,7 +3,13 @@ import { RepeatIcon, XIcon } from "lucide-react"
 
 import { sectionColor } from "@/components/section-style"
 import { Button } from "@/components/ui/button"
-import { type Chord, type Key, chordName } from "@/lib/music"
+import {
+  type Chord,
+  type Key,
+  chordName,
+  keyLabel,
+  noteName,
+} from "@/lib/music"
 import { cn } from "@/lib/utils"
 
 export interface LoopRange {
@@ -23,6 +29,8 @@ export interface TimelinePart {
   beats: number
   /** The section's chords, with the inversions they're played in. */
   chords: Chord[]
+  /** The part's key, when a key change moves it away from the song's. */
+  musicKey?: Key
 }
 
 interface Props {
@@ -81,11 +89,16 @@ export function Timeline({
       }
     : loopRange
 
-  const segments: { key: string; chord: Chord; start: number }[] = []
+  const segments: { key: string; chord: Chord; start: number; k: Key }[] = []
   for (const p of parts) {
     let start = p.start
     for (const chord of p.chords) {
-      segments.push({ key: `${p.slotId}:${chord.id}`, chord, start })
+      segments.push({
+        key: `${p.slotId}:${chord.id}`,
+        chord,
+        start,
+        k: p.musicKey ?? musicKey,
+      })
       start += chord.beats
     }
   }
@@ -120,7 +133,11 @@ export function Timeline({
                   <button
                     key={p.slotId}
                     type="button"
-                    title={`Edit ${p.name}`}
+                    title={
+                      p.musicKey
+                        ? `Edit ${p.name} (in ${keyLabel(p.musicKey)})`
+                        : `Edit ${p.name}`
+                    }
                     onClick={() => onSelectSection(p.sectionId)}
                     className={cn(
                       "flex shrink-0 items-center gap-1 truncate border-l px-1.5 text-left text-[11px] font-medium first:border-l-0",
@@ -132,6 +149,11 @@ export function Timeline({
                   >
                     <span className="font-semibold">{p.letter}</span>
                     <span className="truncate">{p.name}</span>
+                    {p.musicKey && (
+                      <span className="ml-auto shrink-0 rounded-sm bg-background/70 px-1 text-[10px] font-semibold">
+                        {noteName(p.musicKey.root, p.musicKey)}
+                      </span>
+                    )}
                   </button>
                 ))}
             </div>
@@ -180,11 +202,11 @@ export function Timeline({
           </div>
           {/* Chord lane */}
           <div className="relative flex h-9">
-            {segments.map(({ key, chord, start }) => (
+            {segments.map(({ key, chord, start, k }) => (
               <button
                 key={key}
                 type="button"
-                title={`Play from ${chordName(chord, musicKey)}`}
+                title={`Play from ${chordName(chord, k)}`}
                 onClick={() => onSeek(start)}
                 className={cn(
                   "flex shrink-0 items-center truncate border-l px-2 text-left text-sm font-medium first:border-l-0 hover:bg-muted",
@@ -192,7 +214,7 @@ export function Timeline({
                 )}
                 style={{ width: pct(chord.beats) }}
               >
-                {chordName(chord, musicKey)}
+                {chordName(chord, k)}
               </button>
             ))}
           </div>

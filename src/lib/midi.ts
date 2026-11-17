@@ -69,7 +69,18 @@ export interface MidiOptions {
   volumes?: Partial<Record<TrackName, number>>
   /** Named points in the song (sections), shown as markers in DAWs. */
   markers?: { beat: number; text: string }[]
+  /** Later key signatures (key changes), each from its beat on. */
+  keyChanges?: { beat: number; sf: number; minor: boolean }[]
 }
+
+const keySigEvent = (
+  tick: number,
+  sig: { sf: number; minor: boolean }
+): Raw => ({
+  tick,
+  order: 1,
+  bytes: [0xff, 0x59, 0x02, sig.sf & 0xff, sig.minor ? 1 : 0],
+})
 
 export function buildMidi(events: NoteEvent[], opts: MidiOptions): Uint8Array {
   const tracks: number[][] = []
@@ -100,17 +111,10 @@ export function buildMidi(events: NoteEvent[], opts: MidiOptions): Uint8Array {
           bytes: [0xff, 0x06, ...vlq(t.length), ...t],
         }
       }),
-      {
-        tick: 0,
-        order: 1,
-        bytes: [
-          0xff,
-          0x59,
-          0x02,
-          opts.keySig.sf & 0xff,
-          opts.keySig.minor ? 1 : 0,
-        ],
-      },
+      keySigEvent(0, opts.keySig),
+      ...(opts.keyChanges ?? []).map((k) =>
+        keySigEvent(Math.round(k.beat * PPQ), k)
+      ),
     ])
   )
 

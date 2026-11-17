@@ -39,7 +39,9 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   instrument, add chords by playing them, step-enter melody notes.
 - **Section style** — per section: which tracks play (no drums in the intro,
   melody only in the chorus…), its own chord rhythm, an energy level, and a
-  key change (lift the last chorus up a step).
+  key change (lift the last chorus up a step). A key change shows everywhere:
+  chord names, palette and piano roll in the new key, a key badge on the
+  timeline, and a key signature change in the MIDI export.
 - **Bass patterns** — roots, root–fifth, octaves, a walking line that steps
   into the next chord, a syncopated groove, or following the kick drum. Set
   for the song and changed per section.

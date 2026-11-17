@@ -32,7 +32,7 @@ import {
   hasSectionStyle,
 } from "@/lib/arrange"
 import { BASS_STYLES, type BassStyle, bassLabel } from "@/lib/bass"
-import { type Key, keyLabel } from "@/lib/music"
+import { type Key, keyLabel, sectionKey } from "@/lib/music"
 import type { SetOptions } from "@/lib/use-history"
 
 const STYLE_LABELS: Record<ChordStyle, string> = {
@@ -47,19 +47,17 @@ const TRACK_LABELS: Record<TrackName, string> = {
   drums: "Drums",
 }
 
-/** The key a section plays in after its key change. */
-export const sectionKey = (key: Key, transpose = 0): Key => ({
-  ...key,
-  root: (((key.root + transpose) % 12) + 12) % 12,
-})
-
 const semitones = (n: number) =>
   `${n > 0 ? "+" : "−"}${Math.abs(n)} ${Math.abs(n) === 1 ? "semitone" : "semitones"}`
 
 /** Short notes on how a section differs from the song, e.g. "no drums". */
 export function sectionStyleSummary(
   section: Section,
-  { bass, anyDrums }: { bass: boolean; anyDrums: boolean }
+  {
+    bass,
+    anyDrums,
+    musicKey,
+  }: { bass: boolean; anyDrums: boolean; musicKey?: Key }
 ) {
   const out: string[] = []
   const silent = [
@@ -76,7 +74,12 @@ export function sectionStyleSummary(
     out.push(`${bassLabel(section.bassStyle).toLowerCase()} bass`)
   const energy = section.energy ?? 1
   if (energy !== 1) out.push(energy < 1 ? "softer" : "louder")
-  if (section.transpose) out.push(semitones(section.transpose))
+  if (section.transpose)
+    out.push(
+      musicKey
+        ? `in ${keyLabel(sectionKey(musicKey, section.transpose))}`
+        : semitones(section.transpose)
+    )
   if (section.buildUp) out.push("build-up")
   return out
 }
