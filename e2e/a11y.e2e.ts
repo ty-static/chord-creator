@@ -5,8 +5,13 @@ import { expect, loadExample, openApp, openTab, test } from "./fixtures"
 
 /** Axe violations on the page, as "rule: element" lines (empty when clean). */
 async function violations(page: Page) {
-  // Let toasts and dialogs finish animating in: mid-fade colours fail contrast.
+  // Let toasts and dialogs finish animating in or out: mid-fade colours
+  // fail contrast.
   await page.waitForTimeout(600)
+  await expect(
+    page.locator('[data-sonner-toast][data-removed="true"]')
+  ).toHaveCount(0)
+  await page.waitForTimeout(100)
   const { violations } = await new AxeBuilder({ page }).analyze()
   return violations.flatMap((v) =>
     v.nodes.map((n) => `${v.id}: ${n.target.join(" ")}`)

@@ -84,6 +84,12 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
 - **Fast first load** — dialogs, exports, MIDI import and the sampler are
   separate downloads, fetched in the background once the page is idle
   (skipped when the browser is set to save data).
+- **Install and offline** — install it as an app (Chrome and Edge offer it
+  from the menu, iPhone and iPad from Safari's Share menu). After the first
+  visit the whole app opens and plays with no connection: a service worker
+  keeps every file of the current version, and instruments you've played
+  stay cached (others use the built-in synth until you're back online). A
+  new version shows a Reload prompt instead of changing under you.
 - Undo/redo, example songs, a welcome tour, light/dark theme, mobile layout.
 
 ## Development
@@ -104,8 +110,9 @@ npm run build    # type-check + production build into dist/
   song files and share links.
 - **Browser tests** (`e2e/*.e2e.ts`, Playwright) build the app and click
   through it in Chromium: adding chords, undo/redo, playback, My songs, share
-  links, MIDI/WAV export, MIDI and song-file import, key changes, melody
-  linking, and the header and layout at phone, tablet and desktop widths.
+  links, MIDI/WAV/stems export, MIDI and song-file import, key changes,
+  melody linking, opening offline, and the header and layout at phone,
+  tablet and desktop widths.
   An accessibility suite runs axe on each screen in both themes and checks
   keyboard use of the drum grid and the piano roll.
   They block the network, so instruments use the built-in synth, and fail on
@@ -133,7 +140,12 @@ Built with Vite, React 19, TypeScript, Tailwind CSS v4 and
 | `src/lib/audio-engine.ts` | Web Audio engine: sampled instruments, buses, mixer, reverb               |
 | `src/lib/scheduler.ts`    | Look-ahead playback scheduling with looping and live edits (pure, tested) |
 | `src/lib/use-player.ts`   | React hook that drives the scheduler with the real audio clock            |
-| `src/lib/render.ts`       | Offline WAV rendering and encoding                                        |
+| `src/lib/render.ts`       | Offline WAV rendering and encoding, stems                                 |
+| `src/lib/tempo.ts`        | Tempo map: section tempos and slow-downs, beats to seconds                |
+| `src/lib/zip.ts`          | Minimal zip writer (for stems)                                            |
+| `src/lib/pwa.ts`          | Service worker registration, updates, install prompt, online status       |
+| `sw/service-worker.js`    | The service worker; the build adds the file list (see `vite.config.ts`)   |
+| `public/`                 | Web app manifest and icons (`icon.svg` is the source of the PNGs)         |
 | `src/lib/song-file.ts`    | Song validation, `.json` song files and backups, share-link encoding      |
 | `src/lib/library.ts`      | The song library in local storage (and moving the old single save in)     |
 | `src/lib/midi.ts`         | MIDI file writer                                                          |

@@ -11,6 +11,7 @@ import {
   LayersIcon,
   LibraryIcon,
   Loader2Icon,
+  MonitorDownIcon,
   MoonIcon,
   MusicIcon,
   PlayIcon,
@@ -20,6 +21,7 @@ import {
   SunIcon,
   Undo2Icon,
   UploadIcon,
+  WifiOffIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -98,6 +100,7 @@ import { type MidiNoteEvent, midiInput } from "@/lib/midi-input"
 import { INSTRUMENTS } from "@/lib/instruments"
 import { buildMidi, downloadBytes } from "@/lib/midi"
 import { hasTempoChanges, tempoMap } from "@/lib/tempo"
+import { registerServiceWorker, useInstall, useOnline } from "@/lib/pwa"
 import {
   ROOTS,
   SCALES,
@@ -256,6 +259,43 @@ export function App() {
   } | null>(null)
   const player = usePlayer()
   const { theme, setTheme } = useTheme()
+
+  // Offline use and installing as an app.
+  const { how: installHow, install } = useInstall()
+  React.useEffect(
+    () =>
+      registerServiceWorker((apply) =>
+        toast("A new version of Chord Creator is ready", {
+          description: "Reload to use it. Your song is saved.",
+          duration: Infinity,
+          action: { label: "Reload", onClick: apply },
+        })
+      ),
+    []
+  )
+  const online = useOnline()
+  const wasOnline = React.useRef(online)
+  React.useEffect(() => {
+    if (wasOnline.current === online) return
+    wasOnline.current = online
+    if (online) toast.success("Back online")
+    else
+      toast("You're offline", {
+        icon: <WifiOffIcon className="size-4" />,
+        description:
+          "Chord Creator keeps working. Instruments you haven't played yet use the built-in synth until you're back online.",
+      })
+  }, [online])
+  const installApp = async () => {
+    if (installHow === "ios")
+      return toast("Install on iPhone or iPad", {
+        description: "In Safari, tap Share, then Add to Home Screen.",
+      })
+    if (await install())
+      toast.success("Chord Creator is installed", {
+        description: "Open it from your apps. It works offline too.",
+      })
+  }
 
   // Save every change to the library. The song as it was opened isn't
   // re-saved, so opening a song doesn't count as editing it.
@@ -1160,6 +1200,11 @@ export function App() {
               <DropdownMenuItem onSelect={() => setTour(true)}>
                 <CircleHelpIcon /> Take the tour
               </DropdownMenuItem>
+              {installHow && (
+                <DropdownMenuItem onSelect={() => void installApp()}>
+                  <MonitorDownIcon /> Install app
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
           <Button
