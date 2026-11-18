@@ -3,16 +3,18 @@ import { type Page } from "@playwright/test"
 
 import { expect, loadExample, openApp, openTab, test } from "./fixtures"
 
-/** Axe violations on the page, as "rule: element" lines (empty when clean). */
-async function violations(page: Page) {
-  // Let toasts and dialogs finish animating in or out: mid-fade colours
-  // fail contrast.
+/**
+ * Axe violations on the page, as "rule: element" lines (empty when clean).
+ * Toasts come and go (and fade while they do), so they're checked on their
+ * own, once one has settled; see "a toast" below.
+ */
+async function violations(page: Page, only?: string) {
+  // Let dialogs finish animating in: mid-fade colours fail contrast.
   await page.waitForTimeout(600)
-  await expect(
-    page.locator('[data-sonner-toast][data-removed="true"]')
-  ).toHaveCount(0)
-  await page.waitForTimeout(100)
-  const { violations } = await new AxeBuilder({ page }).analyze()
+  const axe = new AxeBuilder({ page })
+  const { violations } = await (
+    only ? axe.include(only) : axe.exclude("[data-sonner-toaster]")
+  ).analyze()
   return violations.flatMap((v) =>
     v.nodes.map((n) => `${v.id}: ${n.target.join(" ")}`)
   )
@@ -30,10 +32,26 @@ test.describe("accessibility (axe)", () => {
         // axe misses a label that points at the wrong element: every
         // dropdown and button must have a name of its own.
         for (const role of ["combobox", "button"] as const)
-          for (const el of await page.getByRole(role).all())
+          for (const el of await page
+            .getByRole(role)
+            // Toasts come and go mid-loop; they have their own check.
+            .and(page.locator(":not([data-sonner-toaster] *)"))
+            .all())
             if (await el.isVisible())
               await expect(el, `a ${role} in ${tab}`).toHaveAccessibleName(/\S/)
       }
+    })
+
+  for (const scheme of ["light", "dark"] as const)
+    test(`a toast, ${scheme} theme`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: scheme })
+      await openApp(page)
+      await page.getByRole("button", { name: "Examples and more" }).click()
+      await page.getByRole("menuitem", { name: "New song" }).click()
+      const toast = page.locator("[data-sonner-toast]")
+      await expect(toast).toHaveCount(1)
+      await expect(toast).toHaveAttribute("data-mounted", "true")
+      expect(await violations(page, "[data-sonner-toaster]")).toEqual([])
     })
 
   test("section style, My songs and the phone layout", async ({ page }) => {
@@ -53,8 +71,10 @@ test.describe("accessibility (axe)", () => {
 test.describe("accessibility (axe), first visit", () => {
   test.use({ tour: true })
   test("the welcome tour", async ({ page }) => {
-    await openApp(page)
-    await expect(page.getByRole("dialog")).toBeVisible()
+    // Not openApp: the tour may open before the Play button shows, and
+    // then hides it from the accessibility tree.
+    await page.goto("/")
+    await expect(page.getByRole("dialog", { name: /Welcome/ })).toBeVisible()
     expect(await violations(page)).toEqual([])
   })
 })
