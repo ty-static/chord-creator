@@ -8,6 +8,7 @@ import {
   EllipsisVerticalIcon,
   FilePlusIcon,
   KeyboardIcon,
+  LayersIcon,
   LibraryIcon,
   Loader2Icon,
   MoonIcon,
@@ -213,6 +214,13 @@ const SPACE_EXEMPT =
 
 type ExportScope = "all" | "chords" | "melody" | "drums"
 
+const TRACK_TITLES: Record<TrackName, string> = {
+  chords: "Chords",
+  melody: "Melody",
+  bass: "Bass",
+  drums: "Drums",
+}
+
 const SCOPE_LAYERS: Record<ExportScope, Record<TrackName, boolean>> = {
   all: { chords: true, melody: true, bass: true, drums: true },
   chords: { chords: true, melody: false, bass: true, drums: false },
@@ -240,6 +248,9 @@ export function App() {
   }
   const [scope, setScope] = React.useState<ExportScope>("all")
   const [rendering, setRendering] = React.useState<{
+    kind: "wav" | "stems"
+    /** For stems: which track, e.g. "Bass 3/4". */
+    label?: string
     stage: "loading" | "rendering"
     fraction: number
   } | null>(null)
@@ -896,7 +907,7 @@ export function App() {
   const exportWav = async () => {
     const events = buildEvents(song, SCOPE_LAYERS[scope])
     if (!events.length) return toast.error("Nothing to export yet.")
-    setRendering({ stage: "loading", fraction: 0 })
+    setRendering({ kind: "wav", stage: "loading", fraction: 0 })
     try {
       const { audibleTracks, encodeWav, renderSong } =
         await import("@/lib/render")
@@ -912,7 +923,8 @@ export function App() {
         instruments: song.instruments,
         mix: song.mix,
         reverb: song.reverb,
-        onProgress: (stage, fraction) => setRendering({ stage, fraction }),
+        onProgress: (stage, fraction) =>
+          setRendering({ kind: "wav", stage, fraction }),
       })
       const filename = exportName("wav")
       downloadBytes(
@@ -929,6 +941,63 @@ export function App() {
     } catch (err) {
       console.error(err)
       toast.error("Couldn't render the audio.", {
+        description: "Your browser may not support offline audio rendering.",
+      })
+    } finally {
+      setRendering(null)
+    }
+  }
+
+  const exportStems = async () => {
+    const events = buildEvents(song, SCOPE_LAYERS.all)
+    if (!events.length) return toast.error("Nothing to export yet.")
+    setRendering({ kind: "stems", stage: "loading", fraction: 0 })
+    try {
+      const [{ audibleTracks, encodeWav, renderStems }, { buildZip }] =
+        await Promise.all([import("@/lib/render"), import("@/lib/zip")])
+      if (!audibleTracks(events, song.mix).length) {
+        toast.error("Every track is muted. Unmute some to export stems.")
+        return
+      }
+      const out = await renderStems({
+        events,
+        bpm: song.bpm,
+        tempo,
+        end: beats + endingBeats(song),
+        instruments: song.instruments,
+        mix: song.mix,
+        reverb: song.reverb,
+        onProgress: (track, i, of, fraction) =>
+          setRendering({
+            kind: "stems",
+            label: `${TRACK_TITLES[track]} ${i + 1}/${of}`,
+            stage: "rendering",
+            fraction,
+          }),
+      })
+      const slug = fileSlug(song.title)
+      const filename = `${slug}_stems.zip`
+      downloadBytes(
+        buildZip(
+          out.stems.map((s) => ({
+            name: `${slug}_${s.track}.wav`,
+            data: encodeWav(s.channels, out.sampleRate),
+          }))
+        ),
+        filename,
+        "application/zip"
+      )
+      const secs = Math.round(
+        (out.stems[0]?.channels[0].length ?? 0) / out.sampleRate
+      )
+      toast.success(`Exported ${filename}`, {
+        description: out.fallbacks.length
+          ? `${out.fallbacks.join(", ")} couldn't load, so the built-in synth plays instead.`
+          : `${out.stems.map((s) => TRACK_TITLES[s.track]).join(", ")}: ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")} each, lined up from the start.`,
+      })
+    } catch (err) {
+      console.error(err)
+      toast.error("Couldn't render the stems.", {
         description: "Your browser may not support offline audio rendering.",
       })
     } finally {
@@ -1480,7 +1549,7 @@ export function App() {
                   onClick={exportWav}
                   disabled={!!rendering}
                 >
-                  {rendering ? (
+                  {rendering?.kind === "wav" ? (
                     <>
                       <Loader2Icon className="animate-spin" />
                       {rendering.stage === "loading"
@@ -1494,12 +1563,32 @@ export function App() {
                   )}
                 </Button>
               </div>
+              <Button
+                variant="outline"
+                onClick={() => void exportStems()}
+                disabled={!!rendering}
+                title="One WAV file per track, in a zip, for mixing in a DAW"
+              >
+                {rendering?.kind === "stems" ? (
+                  <>
+                    <Loader2Icon className="animate-spin" />
+                    {rendering.label ?? "Loading…"}
+                    {rendering.label &&
+                      ` · ${Math.round(rendering.fraction * 100)}%`}
+                  </>
+                ) : (
+                  <>
+                    <LayersIcon /> Stems (WAV per track)
+                  </>
+                )}
+              </Button>
               <Button variant="secondary" onClick={() => void shareSong()}>
                 <LinkIcon /> Copy share link
               </Button>
               <p className="text-xs text-muted-foreground">
                 MIDI keeps separate tracks, tempo and key for your DAW. WAV is
-                the finished sound — your instruments, mix and reverb. A share
+                the finished sound — your instruments, mix and reverb. Stems are
+                one WAV per track in a zip, lined up to mix in a DAW. A share
                 link sends the whole song for others to open and edit.
               </p>
             </CardContent>

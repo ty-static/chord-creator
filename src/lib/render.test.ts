@@ -8,6 +8,7 @@ import {
   audibleTracks,
   encodeWav,
   renderSeconds,
+  stemMix,
   trimmedLength,
 } from "@/lib/render"
 
@@ -121,5 +122,21 @@ describe("audibleTracks", () => {
     expect(audibleTracks(events, mix)).toEqual(["drums"])
     mix.drums.volume = 0
     expect(audibleTracks(events, mix)).toEqual([])
+  })
+})
+
+describe("stemMix", () => {
+  it("plays one track at its own volume, whatever is soloed", () => {
+    const mix: Mix = {
+      ...DEFAULT_MIX,
+      melody: { volume: 0.4, mute: false, solo: true },
+      bass: { volume: 0.6, mute: true, solo: false },
+    }
+    const bass = stemMix(mix, "bass")
+    expect(audibleTracks([note("bass"), note("melody")], bass)).toEqual([
+      "bass",
+    ])
+    expect(bass.bass.volume).toBe(0.6)
+    expect(Object.values(bass).some((m) => m.solo)).toBe(false)
   })
 })

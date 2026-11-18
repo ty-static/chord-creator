@@ -67,6 +67,8 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   (chords and beat, no melody, a little softer, slowing down at the end), and end the song with a
   held final chord, a short stab or a fade-out. Endings play in exports and
   whenever the song isn't looping.
+- **Stems export** — one WAV per track (chords, melody, bass, drums) in a
+  zip, all the same length and lined up from the start, for mixing in a DAW.
 - **Count-in** — an optional bar of clicks before Play starts.
 - **Swing and humanize** — a shuffle feel and small, repeatable changes in
   timing and loudness, so playback and exports sound less mechanical.

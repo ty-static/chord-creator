@@ -65,6 +65,40 @@ test("renders a WAV file", async ({ page }) => {
   await expect(page.getByText(/^Exported /)).toBeVisible()
 })
 
+test("exports stems: one WAV per track in a zip", async ({ page }) => {
+  await openApp(page)
+  await loadExample(page, "Lo-fi Evening")
+  const zip = await download(page, () =>
+    page.getByRole("button", { name: /^Stems/ }).click()
+  )
+  expect(zip.name).toBe("lo-fi-evening_stems.zip")
+  // Walk the zip's central directory.
+  const end = zip.bytes.length - 22
+  expect(zip.bytes.readUInt32LE(end)).toBe(0x06054b50)
+  let at = zip.bytes.readUInt32LE(end + 16)
+  const files: { name: string; size: number; offset: number }[] = []
+  for (let i = 0; i < zip.bytes.readUInt16LE(end + 10); i++) {
+    const nameLen = zip.bytes.readUInt16LE(at + 28)
+    files.push({
+      name: ascii(zip.bytes, at + 46, at + 46 + nameLen),
+      size: zip.bytes.readUInt32LE(at + 20),
+      offset: zip.bytes.readUInt32LE(at + 42),
+    })
+    at += 46 + nameLen
+  }
+  expect(files.map((f) => f.name)).toEqual(
+    ["chords", "melody", "bass", "drums"].map((t) => `lo-fi-evening_${t}.wav`)
+  )
+  // Each is a WAV, and all are the same length so they line up.
+  for (const f of files) {
+    const data = f.offset + 30 + f.name.length
+    expect(ascii(zip.bytes, data, data + 4)).toBe("RIFF")
+    expect(f.size).toBe(files[0].size)
+  }
+  expect(files[0].size).toBeGreaterThan(44_100 * 4)
+  await expect(page.getByText(/^Exported .*_stems.zip/)).toBeVisible()
+})
+
 test("downloads a song file and opens it again", async ({ page }) => {
   await openApp(page)
   await loadExample(page, "Epic Score")

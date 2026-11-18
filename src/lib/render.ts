@@ -25,6 +25,10 @@ export interface RenderOptions {
   mix: Mix
   reverb: number
   sampleRate?: number
+  /** Render this many seconds instead of working it out from the notes. */
+  seconds?: number
+  /** Cut the silence after the song (default true). */
+  trim?: boolean
   /** Called with "loading", then "rendering" and a 0..1 fraction. */
   onProgress?: (stage: "loading" | "rendering", fraction: number) => void
 }
@@ -106,7 +110,7 @@ export function encodeWav(channels: Float32Array[], sampleRate: number) {
 export async function renderSong(opts: RenderOptions): Promise<RenderResult> {
   const sampleRate = opts.sampleRate ?? SAMPLE_RATE
   const tempo = opts.tempo?.length ? opts.tempo : steadyTempo(opts.bpm)
-  const seconds = renderSeconds(opts.events, tempo, opts.end)
+  const seconds = opts.seconds ?? renderSeconds(opts.events, tempo, opts.end)
   const ctx = new OfflineAudioContext(
     2,
     Math.ceil(seconds * sampleRate),
@@ -160,11 +164,83 @@ export async function renderSong(opts: RenderOptions): Promise<RenderResult> {
   const channels = Array.from({ length: buffer.numberOfChannels }, (_, c) =>
     buffer.getChannelData(c)
   )
+  if (opts.trim === false)
+    return { channels, sampleRate, fallbacks: engine.status.failed }
   const songEnd = Math.ceil((LEAD_IN + secondsAt(tempo, opts.end)) * sampleRate)
   const keep = trimmedLength(channels, songEnd) + Math.round(0.05 * sampleRate)
   return {
     channels: channels.map((ch) => ch.slice(0, Math.min(keep, ch.length))),
     sampleRate,
     fallbacks: engine.status.failed,
+  }
+}
+
+/** A mix that plays only `track`, at its own volume and pan. */
+export function stemMix(mix: Mix, track: TrackName): Mix {
+  return Object.fromEntries(
+    (Object.keys(mix) as TrackName[]).map((t) => [
+      t,
+      { ...mix[t], solo: false, mute: t !== track },
+    ])
+  ) as Mix
+}
+
+export interface Stem {
+  track: TrackName
+  channels: Float32Array[]
+}
+
+/**
+ * Render each audible track on its own, all the same length and starting
+ * together, so they line up when dropped into a DAW. Each keeps its volume
+ * and its share of the reverb; played together they sound close to the mix
+ * (each is compressed on its own, so not sample for sample).
+ */
+export async function renderStems(
+  opts: Omit<RenderOptions, "onProgress"> & {
+    onProgress?: (
+      track: TrackName,
+      index: number,
+      of: number,
+      fraction: number
+    ) => void
+  }
+): Promise<{ stems: Stem[]; sampleRate: number; fallbacks: string[] }> {
+  const sampleRate = opts.sampleRate ?? SAMPLE_RATE
+  const tempo = opts.tempo?.length ? opts.tempo : steadyTempo(opts.bpm)
+  // In the mixer's order.
+  const audible = audibleTracks(opts.events, opts.mix)
+  const tracks = (["chords", "melody", "bass", "drums"] as TrackName[]).filter(
+    (t) => audible.includes(t)
+  )
+  const seconds = renderSeconds(opts.events, tempo, opts.end)
+  const stems: Stem[] = []
+  const fallbacks = new Set<string>()
+  for (const [i, track] of tracks.entries()) {
+    opts.onProgress?.(track, i, tracks.length, 0)
+    const out = await renderSong({
+      ...opts,
+      events: opts.events.filter((e) => e.track === track),
+      mix: stemMix(opts.mix, track),
+      seconds,
+      trim: false,
+      onProgress: (stage, f) =>
+        opts.onProgress?.(track, i, tracks.length, stage === "loading" ? 0 : f),
+    })
+    out.fallbacks.forEach((f) => fallbacks.add(f))
+    stems.push({ track, channels: out.channels })
+  }
+  // Trim the silence after the last sound of any stem, the same for all.
+  const songEnd = Math.ceil((LEAD_IN + secondsAt(tempo, opts.end)) * sampleRate)
+  const keep =
+    Math.max(songEnd, ...stems.map((s) => trimmedLength(s.channels, songEnd))) +
+    Math.round(0.05 * sampleRate)
+  return {
+    stems: stems.map((s) => ({
+      ...s,
+      channels: s.channels.map((ch) => ch.slice(0, Math.min(keep, ch.length))),
+    })),
+    sampleRate,
+    fallbacks: [...fallbacks],
   }
 }
