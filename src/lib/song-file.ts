@@ -3,6 +3,8 @@
 
 import {
   type ChordStyle,
+  ENDINGS,
+  type Ending,
   MAX_ENERGY,
   MAX_TRANSPOSE,
   MIN_ENERGY,
@@ -43,6 +45,7 @@ import {
 } from "@/lib/music"
 import { MAX_SECTIONS, MAX_SLOTS, makeSection } from "@/lib/sections"
 import { type MeterId, drumSteps, isMeterId, meterOf } from "@/lib/meter"
+import { isChordStyle } from "@/lib/rhythm"
 
 export const DEFAULT_TITLE = "Untitled song"
 export const MAX_TITLE = 60
@@ -94,7 +97,6 @@ const id = (x: unknown) =>
   typeof x === "string" && /^[\w-]{1,40}$/.test(x) ? x : uid()
 
 const CHORD_TYPES: ChordType[] = ["triad", "seventh", "ninth", "sus2", "sus4"]
-const STYLES: ChordStyle[] = ["block", "pulse", "arpeggio"]
 const isBassStyle = (x: unknown): x is BassStyle =>
   BASS_STYLES.some((b) => b.value === x)
 
@@ -193,7 +195,7 @@ function section(
     drums: drums(x.drums, meter),
     // Only kept when they differ from the song, so files stay small.
     ...(tacet.length ? { tacet } : {}),
-    ...(STYLES.includes(x.chordStyle as ChordStyle)
+    ...(isChordStyle(x.chordStyle)
       ? { chordStyle: x.chordStyle as ChordStyle }
       : {}),
     ...(isBassStyle(x.bassStyle) && x.bassStyle !== undefined
@@ -296,7 +298,7 @@ export function normalizeSong(raw: unknown): Song {
     ...(meter !== "4/4" ? { meter } : {}),
     sections,
     arrangement,
-    chordStyle: STYLES.includes(raw.chordStyle as ChordStyle)
+    chordStyle: isChordStyle(raw.chordStyle)
       ? (raw.chordStyle as ChordStyle)
       : "block",
     bass: bool(raw.bass, true),
@@ -310,6 +312,9 @@ export function normalizeSong(raw: unknown): Song {
     ...feel("swing", raw.swing),
     ...feel("humanize", raw.humanize),
     ...(raw.crashOnChange === true ? { crashOnChange: true } : {}),
+    ...(ENDINGS.some((e) => e.value === raw.ending)
+      ? { ending: raw.ending as Ending }
+      : {}),
   }
 }
 

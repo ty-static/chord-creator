@@ -18,6 +18,10 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   drag, type the letters, loop one part, or split off a variation.
 - **Chords** — diatonic palette, presets, randomize, triads/7ths/9ths/sus,
   inversions, drag to reorder, optional automatic voice leading.
+- **Chord rhythm** — block, pulse or arpeggio, or a pattern: guitar strums
+  (down, down-up, up-down-up), off-beat skanks, the Charleston and
+  oom-pah. Patterns follow the time signature (oom-pah-pah in 3/4) and can
+  change per section.
 - **Chords outside the key** — secondary dominants (V7/V…), borrowed chords
   (iv, ♭VI, ♭VII, ♭III, the Neapolitan ♭II; V, IV and a Picardy I in minor),
   and "next chord" suggestions from common progressions. A MIDI keyboard
@@ -55,6 +59,12 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
 - **Fills and transitions** — snare fill, tom run, snare roll or drop-out at
   the end of a section; a crash on every new section; and a build-up that
   swells into the next section.
+- **Intros, outros and endings** — add an intro made from the first
+  section's opening bars or an outro from the last section's closing bars
+  (chords and beat, no melody, a little softer), and end the song with a
+  held final chord, a short stab or a fade-out. Endings play in exports and
+  whenever the song isn't looping.
+- **Count-in** — an optional bar of clicks before Play starts.
 - **Swing and humanize** — a shuffle feel and small, repeatable changes in
   timing and loudness, so playback and exports sound less mechanical.
 - **My songs** — every song is saved in the browser as you work. Open,
@@ -62,6 +72,13 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   `.json` file and open song files or backups again (by button or drop).
 - **Share links** — the whole song is compressed into the link's `#song=`
   hash, so no server is needed; opening one adds a copy to My songs.
+- **Accessible** — works from the keyboard (a skip link, arrow keys in the
+  drum grid, Tab and `[` / `]` through melody notes), every control named
+  for screen readers, cards as headings, and colours that meet WCAG AA
+  contrast in both themes. Checked with axe in the browser tests.
+- **Fast first load** — dialogs, exports, MIDI import and the sampler are
+  separate downloads, fetched in the background once the page is idle
+  (skipped when the browser is set to save data).
 - Undo/redo, example songs, a welcome tour, light/dark theme, mobile layout.
 
 ## Development
@@ -84,6 +101,8 @@ npm run build    # type-check + production build into dist/
   through it in Chromium: adding chords, undo/redo, playback, My songs, share
   links, MIDI/WAV export, MIDI and song-file import, key changes, melody
   linking, and the header and layout at phone, tablet and desktop widths.
+  An accessibility suite runs axe on each screen in both themes and checks
+  keyboard use of the drum grid and the piano roll.
   They block the network, so instruments use the built-in synth, and fail on
   any error in the page. Run `npx playwright install chromium` once first;
   `npm run e2e:ui` opens Playwright's UI.
@@ -101,6 +120,7 @@ Built with Vite, React 19, TypeScript, Tailwind CSS v4 and
 | `src/lib/arrange.ts`      | Song model; lays out the form and turns it into timed note events         |
 | `src/lib/sections.ts`     | Section and form editing, form letters, saved-song migration              |
 | `src/lib/bass.ts`         | Bass line patterns                                                        |
+| `src/lib/rhythm.ts`       | Chord rhythms: block, pulse, arpeggio, strums and other patterns          |
 | `src/lib/feel.ts`         | Swing and humanize timing                                                 |
 | `src/lib/melody-links.ts` | Melody from another section, and lead-ins into the next section           |
 | `src/lib/meter.ts`        | Time signatures: bar lengths, felt beats, MIDI time-signature bytes       |

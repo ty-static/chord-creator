@@ -393,7 +393,11 @@ export function ChordEditor({
                                 })
                               }
                             >
-                              <SelectTrigger size="sm" className="w-full">
+                              <SelectTrigger
+                                size="sm"
+                                className="w-full"
+                                aria-label={`Degree of chord ${i + 1}`}
+                              >
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -436,7 +440,11 @@ export function ChordEditor({
                                 })
                               }
                             >
-                              <SelectTrigger size="sm" className="w-full">
+                              <SelectTrigger
+                                size="sm"
+                                className="w-full"
+                                aria-label={`Type of chord ${i + 1}`}
+                              >
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -460,7 +468,11 @@ export function ChordEditor({
                                 update(chord.id, { inversion: Number(v) })
                               }
                             >
-                              <SelectTrigger size="sm" className="w-full">
+                              <SelectTrigger
+                                size="sm"
+                                className="w-full"
+                                aria-label={`Inversion of chord ${i + 1}`}
+                              >
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -481,7 +493,11 @@ export function ChordEditor({
                                 update(chord.id, { beats: Number(v) })
                               }
                             >
-                              <SelectTrigger size="sm" className="w-full">
+                              <SelectTrigger
+                                size="sm"
+                                className="w-full"
+                                aria-label={`Length of chord ${i + 1}`}
+                              >
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>

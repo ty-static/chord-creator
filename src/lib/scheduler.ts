@@ -51,7 +51,18 @@ export interface Transport {
   scheduled: { time: number; release: Release | void }[]
   /** Audio time the song ends (when not looping), once known. */
   endTime: number | null
+  /** Audio time the music starts (after any count-in); edits don't move it. */
+  startTime: number
 }
+
+/** A bar of clicks before the music: its length and where the clicks fall, in beats. */
+export interface CountIn {
+  beats: number
+  clicks: number[]
+}
+
+/** The click of a count-in: a closed hi-hat, louder on beat 1. */
+export const CLICK_NOTE = 42
 
 export const instrumentsKey = (i: TrackInstruments) => JSON.stringify(i)
 
@@ -70,6 +81,7 @@ export function createTransport(opts: {
   settings: PlaySettings
   from: number
   now: number
+  countIn?: CountIn
 }): Transport {
   const { settings } = opts
   const { start, stop } = bounds(settings)
@@ -77,7 +89,23 @@ export function createTransport(opts: {
     settings.loop && (opts.from < start || opts.from >= stop)
       ? start
       : opts.from
-  const t0 = opts.now + START_DELAY
+  const spb = 60 / settings.bpm
+  const clicksAt = opts.now + START_DELAY
+  const t0 = clicksAt + (opts.countIn?.beats ?? 0) * spb
+  const scheduled: Transport["scheduled"] = (opts.countIn?.clicks ?? []).map(
+    (beat, i) => {
+      const time = clicksAt + beat * spb
+      return {
+        time,
+        release: opts.voices.drums.start({
+          note: CLICK_NOTE,
+          time,
+          duration: 0.1,
+          velocity: i === 0 ? 120 : 84,
+        }),
+      }
+    }
+  )
   return {
     token: opts.token,
     voices: opts.voices,
@@ -86,9 +114,10 @@ export function createTransport(opts: {
     cursorBeat: begin,
     cursorTime: t0,
     carry: true,
-    anchors: [{ time: t0, beat: begin, spb: 60 / settings.bpm }],
-    scheduled: [],
+    anchors: [{ time: t0, beat: begin, spb }],
+    scheduled,
     endTime: null,
+    startTime: t0,
   }
 }
 
@@ -157,7 +186,8 @@ export function advance(tr: Transport, now: number) {
  * Call `advance` afterwards to schedule the new notes.
  */
 export function replan(tr: Transport, now: number) {
-  const t = now + EDIT_LATENCY
+  // During a count-in, the music still starts when it was going to.
+  const t = Math.max(now + EDIT_LATENCY, tr.startTime)
   let b = beatAt(tr, t)
   tr.scheduled = tr.scheduled.filter((n) => {
     if (n.time < t) return true

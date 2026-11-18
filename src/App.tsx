@@ -75,7 +75,6 @@ import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Toaster } from "@/components/ui/sonner"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   Tooltip,
   TooltipContent,
@@ -87,6 +86,7 @@ import {
   type TrackName,
   type Section,
   buildEvents,
+  endingBeats,
   keyChanges,
   layout,
   placedAt,
@@ -124,6 +124,8 @@ import { cn } from "@/lib/utils"
 import { EXAMPLES, type Example, blankSong } from "@/lib/examples"
 import { Library, type LibraryEntry } from "@/lib/library"
 import { BASS_STYLES, type BassStyle, bassHint } from "@/lib/bass"
+import { CHORD_STYLES, chordStyleHint } from "@/lib/rhythm"
+import { prefetchLazyModules } from "@/lib/prefetch"
 import {
   SongFileError,
   decodeShare,
@@ -148,6 +150,7 @@ import {
   barSteps,
   meterOf,
   midiTimeSig,
+  pulses,
 } from "@/lib/meter"
 
 // Loaded the first time they're needed, to keep the first download small.
@@ -185,6 +188,8 @@ function MountWhen({
 }
 
 const TOUR_KEY = "chord-creator:tour-seen"
+/** Whether Play counts in a bar first (a preference, not part of the song). */
+const COUNT_IN_KEY = "chord-creator:count-in"
 
 // The song library, and the song to open first. Opened once per page load
 // (outside React, so StrictMode's double render can't add a song twice).
@@ -203,7 +208,7 @@ const titleFromFile = (name: string) =>
     .slice(0, 60) || "Imported song"
 
 const SPACE_EXEMPT =
-  "input, textarea, select, [contenteditable=true], [role=slider], [role=switch], [role=combobox], [role=option], [role=tab], [role=radio], [role=checkbox], [role=menuitem], [aria-roledescription=sortable]"
+  "input, textarea, select, [contenteditable=true], [role=slider], [role=switch], [role=combobox], [role=option], [role=tab], [role=radio], [role=checkbox], [role=menuitem], [aria-roledescription=sortable], [role=grid] button"
 
 type ExportScope = "all" | "chords" | "melody" | "drums"
 
@@ -220,6 +225,18 @@ export function App() {
   const [songId, setSongId] = React.useState(() => bootSong().id)
   useUndoShortcuts(history.undo, history.redo)
   const [loop, setLoop] = React.useState(true)
+  const [countIn, setCountInState] = React.useState(
+    () => localStorage.getItem(COUNT_IN_KEY) === "1"
+  )
+  const setCountIn = (on: boolean) => {
+    setCountInState(on)
+    try {
+      if (on) localStorage.setItem(COUNT_IN_KEY, "1")
+      else localStorage.removeItem(COUNT_IN_KEY)
+    } catch {
+      // Storage blocked: the setting lasts until the page closes.
+    }
+  }
   const [scope, setScope] = React.useState<ExportScope>("all")
   const [rendering, setRendering] = React.useState<{
     stage: "loading" | "rendering"
@@ -262,6 +279,9 @@ export function App() {
   const editKey = sectionKey(song.key, section.transpose)
   const meter = meterOf(song.meter)
   const bar = barBeats(meter)
+
+  // Fetch the code for dialogs, exports and sound once the page is idle.
+  React.useEffect(() => prefetchLazyModules(), [])
 
   // Welcome tour: shown automatically on the first visit.
   const [tourOpen, setTourOpen] = React.useState(
@@ -411,12 +431,14 @@ export function App() {
       song.sections,
       song.arrangement,
       song.chordStyle,
+      song.meter,
       song.bass,
       song.voiceLeading,
       song.swing,
       song.humanize,
       song.bassStyle,
       song.crashOnChange,
+      song.ending,
     ]
   )
   const playSettings = (
@@ -426,7 +448,8 @@ export function App() {
     return {
       events,
       bpm: song.bpm,
-      end: beats,
+      // The ending plays after the form, unless the song loops round.
+      end: (opts.loop ?? loop) ? beats : beats + endingBeats(song),
       loop: opts.loop ?? loop,
       loopStart: range?.start,
       loopEnd: range?.end,
@@ -519,15 +542,19 @@ export function App() {
 
   const playFrom = (
     from: number,
-    opts: { loop?: boolean; range?: LoopRange | null } = {}
+    opts: { loop?: boolean; range?: LoopRange | null; countIn?: boolean } = {}
   ) => {
     if (!beats) return toast.error("Add at least one chord first.")
-    void player.play(playSettings(opts), from)
+    void player.play(
+      playSettings(opts),
+      from,
+      opts.countIn ? { beats: bar, clicks: pulses(meter) } : undefined
+    )
   }
 
   const togglePlay = () => {
     if (player.playing || player.loading) return player.stop()
-    playFrom(loop && loopRange ? loopRange.start : 0)
+    playFrom(loop && loopRange ? loopRange.start : 0, { countIn })
   }
 
   const changeLoopRange = (range: LoopRange | null) => {
@@ -877,7 +904,7 @@ export function App() {
       const out = await renderSong({
         events,
         bpm: song.bpm,
-        end: beats,
+        end: beats + endingBeats(song),
         instruments: song.instruments,
         mix: song.mix,
         reverb: song.reverb,
@@ -947,6 +974,12 @@ export function App() {
 
   return (
     <div className="min-h-svh bg-background">
+      <a
+        href="#editor"
+        className="sr-only z-50 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
+      >
+        Skip to the editor
+      </a>
       <header className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center gap-1 px-3 py-2.5 sm:gap-1.5 sm:px-4 sm:py-3 lg:gap-3">
           <div className="hidden size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground lg:flex">
@@ -1145,7 +1178,11 @@ export function App() {
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-7xl gap-4 px-3 py-4 sm:gap-6 sm:px-4 sm:py-6 lg:grid-cols-[300px_1fr]">
+      <main
+        id="editor"
+        tabIndex={-1}
+        className="mx-auto grid max-w-7xl gap-4 px-3 py-4 outline-none sm:gap-6 sm:px-4 sm:py-6 lg:grid-cols-[300px_1fr]"
+      >
         <aside className="contents lg:sticky lg:top-20 lg:flex lg:flex-col lg:gap-4 lg:self-start">
           <Card className="order-1 lg:order-none">
             <CardHeader>
@@ -1157,14 +1194,14 @@ export function App() {
             <CardContent className="flex flex-col gap-4">
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="root">Key</Label>
+                  <Label htmlFor="key-root">Key</Label>
                   <Select
                     value={String(song.key.root)}
                     onValueChange={(v) =>
                       patch({ key: { ...song.key, root: Number(v) } })
                     }
                   >
-                    <SelectTrigger id="root" className="w-full">
+                    <SelectTrigger id="key-root" className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1243,6 +1280,7 @@ export function App() {
                   </span>
                 </Label>
                 <Slider
+                  aria-label="Tempo"
                   value={[song.bpm]}
                   min={50}
                   max={200}
@@ -1250,6 +1288,22 @@ export function App() {
                   onValueChange={([v]) =>
                     patch({ bpm: v }, { coalesce: "bpm" })
                   }
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <Label
+                  htmlFor="count-in"
+                  className="flex flex-col items-start gap-0.5"
+                >
+                  Count-in
+                  <span className="text-xs font-normal text-muted-foreground">
+                    A bar of clicks before Play starts
+                  </span>
+                </Label>
+                <Switch
+                  id="count-in"
+                  checked={countIn}
+                  onCheckedChange={setCountIn}
                 />
               </div>
               <FeelSlider
@@ -1272,26 +1326,25 @@ export function App() {
                 }
               />
               <div className="flex flex-col gap-2">
-                <Label>Chord rhythm</Label>
-                <ToggleGroup
-                  type="single"
-                  variant="outline"
-                  className="w-full"
+                <Label htmlFor="chord-rhythm">Chord rhythm</Label>
+                <Select
                   value={song.chordStyle}
-                  onValueChange={(v) =>
-                    v && patch({ chordStyle: v as ChordStyle })
-                  }
+                  onValueChange={(v) => patch({ chordStyle: v as ChordStyle })}
                 >
-                  <ToggleGroupItem value="block" className="flex-1">
-                    Block
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="pulse" className="flex-1">
-                    Pulse
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="arpeggio" className="flex-1">
-                    Arp
-                  </ToggleGroupItem>
-                </ToggleGroup>
+                  <SelectTrigger id="chord-rhythm" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CHORD_STYLES.map((s) => (
+                      <SelectItem key={s.value} value={s.value}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {chordStyleHint(song.chordStyle)}
+                </p>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <Label
@@ -1459,7 +1512,9 @@ export function App() {
             musicKey={song.key}
             beatsPerBar={bar}
             parts={timelineParts}
-            playheadBeat={player.beat}
+            playheadBeat={
+              player.beat === null ? null : Math.min(player.beat, beats)
+            }
             loopRange={loopRange}
             activeChordKey={
               playing && playingChord

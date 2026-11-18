@@ -112,7 +112,7 @@ test("switches the song to 6/8", async ({ page }) => {
   // The drum grid is one bar of 6/8: twelve 16th-note steps, two beats.
   await openTab(page, "Drums")
   await expect(
-    page.getByRole("gridcell", { name: /^Kick step \d+$/ })
+    page.getByRole("button", { name: /^Kick step \d+$/ })
   ).toHaveCount(12)
   await expect(page.getByLabel("Drum pattern")).toHaveText("Ballad")
 
@@ -130,4 +130,73 @@ test("switches the song to 6/8", async ({ page }) => {
   // And the setting is saved with the song.
   await page.reload()
   await expect(page.getByLabel("Time signature")).toHaveText("6/8")
+})
+
+test("picks chord rhythm patterns for the song and a section", async ({
+  page,
+}) => {
+  await openApp(page)
+  await loadExample(page, "Pop Anthem")
+  await page.getByLabel("Chord rhythm", { exact: true }).click()
+  await page.getByRole("option", { name: "Strum" }).click()
+  await expect(page.getByText(/Down and up strums like a guitar/)).toBeVisible()
+
+  // One section plays oom-pah instead.
+  await page.getByRole("button", { name: "Section style" }).click()
+  await page.getByLabel("Chord rhythm for this section").click()
+  await expect(page.getByRole("option", { name: "Song (Strum)" })).toBeVisible()
+  await page.getByRole("option", { name: "Oom-pah" }).click()
+  await page.keyboard.press("Escape")
+  await expect(
+    page.getByText("oom-pah", { exact: false }).first()
+  ).toBeVisible()
+
+  // Plays without errors, and is saved.
+  await page.getByRole("button", { name: "Play", exact: true }).click()
+  await expect(
+    page.getByRole("button", { name: "Stop", exact: true })
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Stop", exact: true }).click()
+  await page.reload()
+  await expect(page.getByLabel("Chord rhythm", { exact: true })).toHaveText(
+    "Strum"
+  )
+})
+
+test("adds an intro and outro, an ending and a count-in", async ({ page }) => {
+  await openApp(page)
+  await loadExample(page, "Classic Rock")
+
+  const add = async (item: RegExp) => {
+    await page.getByRole("button", { name: "Add", exact: true }).click()
+    await page.getByRole("menuitem", { name: item }).click()
+  }
+  await add(/^Intro, from the first section/)
+  await expect(page.getByText("Added Intro at the start")).toBeVisible()
+  await add(/^Outro, from the last section/)
+  await expect(page.getByText("Added Outro at the end")).toBeVisible()
+  // The form now starts with the intro and ends with the outro.
+  const chips = page.getByRole("button", { name: /part \d+ of the form/ })
+  await expect(chips.first()).toHaveAccessibleName(/^\w Intro .*part 1 of/)
+  await expect(chips.last()).toHaveAccessibleName(/^\w Outro /)
+
+  await page.getByRole("combobox", { name: /^Ending/ }).click()
+  await page.getByRole("option", { name: "Final chord" }).click()
+  await expect(page.getByRole("combobox", { name: /^Ending/ })).toContainText(
+    "Final chord"
+  )
+
+  await page.getByLabel("Count-in").click()
+  await page.getByRole("button", { name: "Play", exact: true }).click()
+  await expect(
+    page.getByRole("button", { name: "Stop", exact: true })
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Stop", exact: true }).click()
+
+  // The ending is saved with the song, the count-in as a preference.
+  await page.reload()
+  await expect(page.getByRole("combobox", { name: /^Ending/ })).toContainText(
+    "Final chord"
+  )
+  await expect(page.getByLabel("Count-in")).toBeChecked()
 })

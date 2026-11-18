@@ -3,6 +3,7 @@ import {
   type Key,
   type MelodyNote,
   STEPS_PER_BEAT,
+  chordMidi,
   voiceChords,
   degreeToMidi,
   keySignature,
@@ -12,7 +13,8 @@ import {
 import type { TrackInstruments } from "@/lib/instruments"
 import type { Mix } from "@/lib/audio-engine"
 import { type BassStyle, bassLine } from "@/lib/bass"
-import { type MeterId, barSteps, beatsIn, meterOf } from "@/lib/meter"
+import { type MeterId, barBeats, barSteps, meterOf } from "@/lib/meter"
+import { type ChordStyle, chordHits } from "@/lib/rhythm"
 import {
   DRUM_PIECES,
   DRUM_STEPS,
@@ -28,7 +30,7 @@ import {
   swingTime,
 } from "@/lib/feel"
 
-export type ChordStyle = "block" | "pulse" | "arpeggio"
+export type { ChordStyle } from "@/lib/rhythm"
 export type TrackName = "chords" | "melody" | "bass" | "drums"
 export const TRACK_NAMES: TrackName[] = ["chords", "melody", "bass", "drums"]
 
@@ -68,6 +70,7 @@ const BUILD_UP_FROM = 0.8
 const BUILD_UP_TO = 1.3
 
 const CRASH = DRUM_PIECES.find((d) => d.id === "crash")!.midi
+const KICK = DRUM_PIECES.find((d) => d.id === "kick")!.midi
 
 export const MIN_ENERGY = 0.5
 export const MAX_ENERGY = 1.5
@@ -116,7 +119,39 @@ export interface Song {
   humanize?: number
   /** A crash cymbal wherever the form moves to a different section. */
   crashOnChange?: boolean
+  /** How the song ends (it just stops when unset). */
+  ending?: Ending
 }
+
+export type Ending = "hold" | "stab" | "fade"
+
+export const ENDINGS: { value: Ending; label: string; hint: string }[] = [
+  {
+    value: "hold",
+    label: "Final chord",
+    hint: "One more bar: the home chord, held, with a crash and the low root",
+  },
+  {
+    value: "stab",
+    label: "Short stab",
+    hint: "One last short hit of the home chord on the next downbeat",
+  },
+  {
+    value: "fade",
+    label: "Fade out",
+    hint: "The last bars get quieter until the song fades away",
+  },
+]
+
+/** How many bars a fade-out takes at most. */
+export const FADE_BARS = 4
+const FADE_TO = 0.2
+
+/** Beats the ending adds after the form (the bar of a final chord or stab). */
+export const endingBeats = (song: Song) =>
+  song.ending === "hold" || song.ending === "stab"
+    ? barBeats(meterOf(song.meter))
+    : 0
 
 /** What one section needs to become notes. */
 export type Part = Pick<
@@ -261,7 +296,79 @@ export function buildEvents(
       })
     }
   }
-  return events
+  return song.ending ? withEnding(song, placed, events, layers) : events
+}
+
+/** Add the song's ending: a final chord or stab after the form, or a fade. */
+function withEnding(
+  song: Song,
+  placed: Placed[],
+  events: NoteEvent[],
+  layers: Record<TrackName, boolean>
+): NoteEvent[] {
+  const last = placed.filter((p) => p.beats > 0).at(-1)
+  if (!last) return events
+  const end = last.start + last.beats
+  const bar = barBeats(meterOf(song.meter))
+
+  if (song.ending === "fade") {
+    const length = Math.min(FADE_BARS * bar, end)
+    const from = end - length
+    return events.map((e) =>
+      e.start < from
+        ? e
+        : {
+            ...e,
+            velocity: clampVelocity(
+              e.velocity * (1 - ((1 - FADE_TO) * (e.start - from)) / length)
+            ),
+          }
+    )
+  }
+
+  // The home chord of the last section's key, voiced to follow its last chord.
+  const key = sectionKey(song.key, last.section.transpose)
+  const tonic: Chord = {
+    id: "ending",
+    degree: 0,
+    type: "triad",
+    inversion: 0,
+    beats: bar,
+  }
+  const lastChord = last.section.chords.at(-1)!
+  const notes = voiceChords([lastChord, tonic], key, song.voiceLeading)[1].notes
+  const hold = song.ending === "hold"
+  const length = hold ? bar * 0.98 : 0.35
+  const tacet = last.section.tacet ?? []
+  const plays = (t: TrackName) => layers[t] && !tacet.includes(t)
+  const out = [...events]
+  if (plays("chords"))
+    for (const midi of notes)
+      out.push({
+        midi,
+        start: end,
+        duration: length,
+        velocity: hold ? 84 : 100,
+        track: "chords",
+      })
+  if (plays("bass") && song.bass)
+    out.push({
+      midi: chordMidi(tonic, key)[0] - 12,
+      start: end,
+      duration: length,
+      velocity: hold ? 92 : 104,
+      track: "bass",
+    })
+  if (plays("drums") && last.section.drums.enabled)
+    for (const midi of [CRASH, KICK])
+      out.push({
+        midi,
+        start: end,
+        duration: 0.2,
+        velocity: 112,
+        track: "drums",
+      })
+  return out
 }
 
 /** The notes of one section, starting at beat 0. */
@@ -278,44 +385,9 @@ export function partEvents(
   const voicings = voiceChords(song.chords, song.key, song.voiceLeading)
   song.chords.forEach((chord, ci) => {
     const notes = voicings[ci].notes
-    if (layers.chords) {
-      if (song.chordStyle === "block") {
-        for (const midi of notes)
-          events.push({
-            midi,
-            start: t,
-            duration: chord.beats * 0.98,
-            velocity: 76,
-            track: "chords",
-          })
-      } else if (song.chordStyle === "pulse") {
-        // On every felt beat: quarters in 4/4, dotted quarters in 6/8.
-        const end = t + chord.beats
-        const hits = beatsIn(meter, t, end)
-        hits.forEach((at, i) => {
-          const gap = (hits[i + 1] ?? end) - at
-          for (const midi of notes)
-            events.push({
-              midi,
-              start: at,
-              duration: gap * 0.85,
-              velocity: i % 2 === 0 ? 80 : 66,
-              track: "chords",
-            })
-        })
-      } else {
-        const pattern = [...notes, ...notes.slice(1, -1).reverse()]
-        const steps = chord.beats * 2
-        for (let s = 0; s < steps; s++)
-          events.push({
-            midi: pattern[s % pattern.length],
-            start: t + s / 2,
-            duration: 0.48,
-            velocity: s % 2 === 0 ? 78 : 64,
-            track: "chords",
-          })
-      }
-    }
+    if (layers.chords)
+      for (const h of chordHits(song.chordStyle, notes, t, chord.beats, meter))
+        events.push({ ...h, track: "chords" })
     t += chord.beats
   })
 

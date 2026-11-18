@@ -4,6 +4,7 @@ import type { NoteEvent, TrackName } from "@/lib/arrange"
 import type { PlayNote } from "@/lib/audio-engine"
 import { DEFAULT_INSTRUMENTS } from "@/lib/instruments"
 import {
+  CLICK_NOTE,
   EDIT_LATENCY,
   LOOKAHEAD,
   type PlaySettings,
@@ -359,5 +360,54 @@ describe("scheduler: editing while playing", () => {
     const times = rec.heard().map((n) => +(n.time - first).toFixed(6))
     expect(new Set(times).size).toBe(times.length)
     times.forEach((x, i) => expect(x).toBeCloseTo(i * 0.5))
+  })
+})
+
+describe("scheduler: count-in", () => {
+  const countIn = { beats: 4, clicks: [0, 1, 2, 3] }
+
+  it("clicks a bar, then starts the music", () => {
+    const rec = recorder()
+    const tr = createTransport({
+      token: 1,
+      voices: rec.voices,
+      settings: settings(),
+      from: 0,
+      now: T0,
+      countIn,
+    })
+    run(tr, T0, T0 + 6)
+    const heard = rec.heard()
+    const clicks = heard.filter((n) => n.note === CLICK_NOTE)
+    expect(clicks.map((n) => +(n.time - first).toFixed(6))).toEqual([
+      0, 0.5, 1, 1.5,
+    ])
+    expect(clicks[0].velocity).toBeGreaterThan(clicks[1].velocity)
+    // The first note comes a bar (2 s at 120 BPM) after the first click.
+    const notes = heard.filter((n) => n.track === "melody")
+    expect(+(notes[0].time - first).toFixed(6)).toBe(2)
+    // The playhead waits at the start until then.
+    expect(beatAt(tr, first + 1)).toBe(0)
+  })
+
+  it("keeps the clicks and the start time through an edit", () => {
+    const rec = recorder()
+    const tr = createTransport({
+      token: 1,
+      voices: rec.voices,
+      settings: settings(),
+      from: 0,
+      now: T0,
+      countIn,
+    })
+    advance(tr, T0)
+    tr.settings = settings({ events: scale.map((e) => ({ ...e, midi: 72 })) })
+    replan(tr, T0 + 0.3)
+    run(tr, T0 + 0.3, T0 + 6)
+    const heard = rec.heard()
+    expect(heard.filter((n) => n.note === CLICK_NOTE)).toHaveLength(4)
+    const notes = heard.filter((n) => n.track === "melody")
+    expect(notes.map((n) => n.note)).toEqual([72, 72, 72, 72])
+    expect(+(notes[0].time - first).toFixed(6)).toBe(2)
   })
 })

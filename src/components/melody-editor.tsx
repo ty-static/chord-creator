@@ -453,6 +453,20 @@ export function MelodyEditor({
     const note = melody.find((n) => n.id === selected)
     if (!note) return
 
+    // [ and ] select the previous / next note (and move focus to it).
+    if (e.key === "[" || e.key === "]") {
+      e.preventDefault()
+      const sorted = [...melody].sort((a, b) => a.start - b.start)
+      const i = sorted.findIndex((n) => n.id === note.id)
+      const to = sorted[i + (e.key === "]" ? 1 : -1)]
+      if (!to) return
+      setSelected(to.id)
+      gridRef.current
+        ?.querySelector<HTMLElement>(`[data-note-id="${to.id}"]`)
+        ?.focus()
+      return
+    }
+
     if (e.key === "l" || e.key === "L") {
       e.preventDefault()
       toggleLock(note.id)
@@ -529,7 +543,8 @@ export function MelodyEditor({
           right edge to resize it. Click a note to select it (arrow keys nudge
           it, Delete removes it, L locks it); double-click or right-click
           deletes. Use a bar number's menu to regenerate a bar or repeat it as a
-          motif.
+          motif. From the keyboard, Tab to the notes and use [ and ] to move
+          between them.
         </CardDescription>
         <CardAction className="flex gap-2">
           <DropdownMenu>
@@ -652,6 +667,7 @@ export function MelodyEditor({
               <span className="font-mono text-foreground">{density}%</span>
             </Label>
             <Slider
+              aria-label="Note density"
               value={[density]}
               min={0}
               max={100}
@@ -926,16 +942,24 @@ export function MelodyEditor({
                     />
                   ))}
 
-                  {notes.map((n) => {
+                  {notes.map((n, ni) => {
                     const active = drag?.orig.id === n.id || n.id === selected
+                    const name = noteNameWithOctave(midiOf(n.degree), musicKey)
+                    // One note is in the tab order: the selected one, or the first.
+                    const tabbable = selected ? n.id === selected : ni === 0
                     return (
                       <div
                         key={n.id}
                         data-note-id={n.id}
-                        title={`${noteNameWithOctave(midiOf(n.degree), musicKey)}${n.locked ? " (locked)" : ""}`}
+                        role="button"
+                        tabIndex={tabbable ? 0 : -1}
+                        aria-pressed={n.id === selected}
+                        aria-label={`${name}, ${stepLabel(n.start, STEPS_PER_BAR)}, ${n.length} ${n.length === 1 ? "eighth" : "eighths"} long${n.locked ? ", locked" : ""}`}
+                        onFocus={() => setSelected(n.id)}
+                        title={`${name}${n.locked ? " (locked)" : ""}`}
                         data-locked={n.locked || undefined}
                         className={cn(
-                          "group absolute flex cursor-grab items-center justify-end rounded-sm bg-primary shadow-sm ring-1 ring-primary-foreground/30 hover:brightness-110",
+                          "group absolute flex cursor-grab items-center justify-end rounded-sm bg-primary shadow-sm ring-1 ring-primary-foreground/30 outline-none hover:brightness-110 focus-visible:ring-2 focus-visible:ring-foreground",
                           n.locked &&
                             "cursor-pointer bg-[repeating-linear-gradient(135deg,transparent_0_4px,color-mix(in_oklab,var(--primary-foreground)_18%,transparent)_4px_6px)] ring-primary-foreground/60",
                           active && "z-10 ring-2 ring-foreground"
@@ -983,4 +1007,12 @@ export function MelodyEditor({
       </CardContent>
     </Card>
   )
+}
+
+/** "bar 2, beat 3" or "bar 2, beat 3½" for a melody step. */
+function stepLabel(step: number, barSteps: number) {
+  const bar = Math.floor(step / barSteps) + 1
+  const inBar = step % barSteps
+  const beat = Math.floor(inBar / STEPS_PER_BEAT) + 1
+  return `bar ${bar}, beat ${beat}${inBar % STEPS_PER_BEAT ? "½" : ""}`
 }

@@ -18,6 +18,8 @@ import { CSS } from "@dnd-kit/utilities"
 import {
   ChevronDownIcon,
   CopyIcon,
+  LogInIcon,
+  LogOutIcon,
   CopyPlusIcon,
   PencilIcon,
   PlayIcon,
@@ -56,13 +58,22 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import type { Placed, Section, Song } from "@/lib/arrange"
+import { ENDINGS, type Placed, type Section, type Song } from "@/lib/arrange"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { barBeats, meterOf } from "@/lib/meter"
 import { uid } from "@/lib/music"
 import {
   MAX_SECTIONS,
   MAX_SLOTS,
   SECTION_NAMES,
+  addIntro,
+  addOutro,
   addSection,
   addSlot,
   copySection,
@@ -148,6 +159,20 @@ export function SongForm({
     )
 
   const placedBySlot = new Map(placed.map((p) => [p.slot.id, p]))
+
+  /** Add a made-up intro or outro and open it. */
+  const addEdge = (
+    made: { song: Song; section: Section } | null,
+    where: string
+  ) => {
+    if (!made) return
+    onChange(made.song)
+    onSelect(made.section.id)
+    toast.success(`Added ${made.section.name} ${where}`, {
+      description:
+        "Made from the song's chords, without the melody. Edit it like any section.",
+    })
+  }
 
   return (
     <Card className="gap-3 py-4">
@@ -319,6 +344,19 @@ export function SongForm({
                         <CopyIcon /> New section from {selected.name}
                       </DropdownMenuItem>
                     )}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      disabled={fullSections || fullForm}
+                      onSelect={() => addEdge(addIntro(song), "at the start")}
+                    >
+                      <LogInIcon /> Intro, from the first section
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={fullSections || fullForm}
+                      onSelect={() => addEdge(addOutro(song), "at the end")}
+                    >
+                      <LogOutIcon /> Outro, from the last section
+                    </DropdownMenuItem>
                     {fullSections && (
                       <p className="px-2 py-1.5 text-xs text-muted-foreground">
                         A song can have up to {MAX_SECTIONS} sections.
@@ -326,6 +364,40 @@ export function SongForm({
                     )}
                   </DropdownMenuContent>
                 </DropdownMenu>
+              </li>
+              <li className="ml-auto">
+                <Select
+                  value={song.ending ?? "none"}
+                  onValueChange={(v) => {
+                    const ending = ENDINGS.find((e) => e.value === v)
+                    onChange({ ...song, ending: ending?.value })
+                    if (ending)
+                      toast(`Ending: ${ending.label}`, {
+                        description: `${ending.hint}. It plays when the song isn't looping.`,
+                      })
+                  }}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    aria-label={`Ending: ${ENDINGS.find((e) => e.value === song.ending)?.label ?? "None"}`}
+                    title={
+                      ENDINGS.find((e) => e.value === song.ending)?.hint ??
+                      "The song just stops after the last section"
+                    }
+                    className="h-8 border-dashed"
+                  >
+                    <span className="text-muted-foreground">Ending:</span>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent align="end">
+                    <SelectItem value="none">None</SelectItem>
+                    {ENDINGS.map((e) => (
+                      <SelectItem key={e.value} value={e.value} title={e.hint}>
+                        {e.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </li>
             </ol>
           </SortableContext>
@@ -399,7 +471,6 @@ function SlotChip({
         {...attributes}
         {...listeners}
         aria-roledescription="sortable"
-        aria-label={`Part ${position}: ${section.name}, ${bars} bars. Click to edit, drag to move.`}
         aria-pressed={selected}
         onClick={onSelect}
         className="flex h-full cursor-grab items-center gap-1.5 rounded-l-md pr-1 pl-1 outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
@@ -413,16 +484,23 @@ function SlotChip({
           {letter}
         </span>
         <span className="max-w-28 truncate font-medium">{section.name}</span>
-        <span className="text-xs text-muted-foreground">{bars}</span>
+        <span className="text-xs text-muted-foreground">
+          {bars}
+          <span className="sr-only"> {bars === 1 ? "bar" : "bars"}</span>
+        </span>
+        {/* The name reads e.g. "A Verse 4 bars, part 1 of the form…". */}
+        <span className="sr-only">
+          , part {position} of the form
+          {playing ? ", playing" : ""}
+          {looping ? ", looping" : ""}. Click to edit, drag to move.
+        </span>
         {playing && (
           <span
             className="size-1.5 animate-pulse rounded-full bg-destructive"
-            aria-label="Playing"
+            aria-hidden
           />
         )}
-        {looping && (
-          <RepeatIcon className="size-3 text-primary" aria-label="Looping" />
-        )}
+        {looping && <RepeatIcon className="size-3 text-primary" aria-hidden />}
       </button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

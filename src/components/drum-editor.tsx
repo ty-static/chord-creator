@@ -1,3 +1,4 @@
+import * as React from "react"
 import { EraserIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -67,6 +68,28 @@ export function DrumEditor({
   // Felt beats, in steps: shaded by turns and numbered in the header.
   const beatStarts = pulses(meter).map((p) => p * DRUM_STEPS_PER_BEAT)
   const beatOf = (s: number) => beatStarts.filter((b) => b <= s).length - 1
+
+  // The step that's in the tab order (arrow keys move it).
+  const gridRef = React.useRef<HTMLDivElement>(null)
+  const [cellRaw, setCell] = React.useState({ row: 0, col: 0 })
+  const cell = { row: cellRaw.row, col: Math.min(cellRaw.col, steps - 1) }
+  const onCellKey = (e: React.KeyboardEvent, row: number, col: number) => {
+    const last = { row: DRUM_PIECES.length - 1, col: steps - 1 }
+    const to = {
+      ArrowLeft: { row, col: Math.max(0, col - 1) },
+      ArrowRight: { row, col: Math.min(last.col, col + 1) },
+      ArrowUp: { row: Math.max(0, row - 1), col },
+      ArrowDown: { row: Math.min(last.row, row + 1), col },
+      Home: { row: e.ctrlKey ? 0 : row, col: 0 },
+      End: { row: e.ctrlKey ? last.row : row, col: last.col },
+    }[e.key]
+    if (!to) return
+    e.preventDefault()
+    setCell(to)
+    gridRef.current
+      ?.querySelector<HTMLElement>(`[data-cell="${to.row}-${to.col}"]`)
+      ?.focus()
+  }
 
   const toggle = (piece: DrumPiece, step: number, midi: number) => {
     const row = [...drums.pattern[piece]]
@@ -181,61 +204,78 @@ export function DrumEditor({
           )}
         >
           <div
+            ref={gridRef}
             className="grid min-w-[560px] gap-1"
             style={{
               gridTemplateColumns: `88px repeat(${steps}, minmax(24px, 1fr))`,
             }}
             role="grid"
             aria-label="Drum steps"
+            aria-describedby="drum-grid-help"
           >
-            <div />
-            {Array.from({ length: steps }, (_, s) => (
-              <div
-                key={s}
-                className={cn(
-                  "text-center font-mono text-[10px] text-muted-foreground",
-                  beatStarts.includes(s) && "font-semibold text-foreground"
-                )}
-              >
-                {beatStarts.includes(s) ? beatOf(s) + 1 : "·"}
+            <div role="row" className="contents">
+              <div role="columnheader">
+                <span className="sr-only">Drum</span>
               </div>
-            ))}
-            {DRUM_PIECES.map((piece) => (
-              <div key={piece.id} role="row" className="contents">
-                <button
-                  type="button"
-                  className="truncate rounded px-1 text-left text-xs text-muted-foreground hover:text-foreground"
-                  onClick={() => onPreview(piece.midi)}
-                  title={`Preview ${piece.label}`}
+              {Array.from({ length: steps }, (_, s) => (
+                <div
+                  key={s}
+                  role="columnheader"
+                  aria-label={`Step ${s + 1}`}
+                  className={cn(
+                    "text-center font-mono text-[10px] text-muted-foreground",
+                    beatStarts.includes(s) && "font-semibold text-foreground"
+                  )}
                 >
-                  {piece.label}
-                </button>
-                {drums.pattern[piece.id].map((v, s) => (
+                  {beatStarts.includes(s) ? beatOf(s) + 1 : "·"}
+                </div>
+              ))}
+            </div>
+            {DRUM_PIECES.map((piece, r) => (
+              <div key={piece.id} role="row" className="contents">
+                <div role="rowheader" className="flex min-w-0">
                   <button
-                    key={s}
                     type="button"
-                    role="gridcell"
-                    aria-label={`${piece.label} step ${s + 1}`}
-                    aria-pressed={v > 0}
-                    data-value={v}
-                    onClick={() => toggle(piece.id, s, piece.midi)}
-                    className={cn(
-                      "h-7 rounded-sm border transition-colors",
-                      beatOf(s) % 2 === 0 ? "bg-muted/40" : "bg-muted",
-                      v === 1 && "border-primary/60 bg-primary/50",
-                      v === 2 && "border-primary bg-primary",
-                      s === playStep && "ring-2 ring-ring",
-                      v === 0 && "hover:bg-accent"
-                    )}
-                  />
+                    className="w-full truncate rounded px-1 text-left text-xs text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    onClick={() => onPreview(piece.midi)}
+                    title={`Preview ${piece.label}`}
+                  >
+                    {piece.label}
+                  </button>
+                </div>
+                {drums.pattern[piece.id].map((v, s) => (
+                  <div key={s} role="gridcell" className="flex">
+                    <button
+                      type="button"
+                      data-cell={`${r}-${s}`}
+                      // One step is in the tab order; arrow keys move between them.
+                      tabIndex={r === cell.row && s === cell.col ? 0 : -1}
+                      aria-label={`${piece.label} step ${s + 1}`}
+                      aria-pressed={v > 0}
+                      aria-description={v === 2 ? "accented" : undefined}
+                      data-value={v}
+                      onClick={() => toggle(piece.id, s, piece.midi)}
+                      onFocus={() => setCell({ row: r, col: s })}
+                      onKeyDown={(e) => onCellKey(e, r, s)}
+                      className={cn(
+                        "h-7 w-full rounded-sm border transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background focus-visible:outline-none",
+                        beatOf(s) % 2 === 0 ? "bg-muted/40" : "bg-muted",
+                        v === 1 && "border-primary/60 bg-primary/50",
+                        v === 2 && "border-primary bg-primary",
+                        s === playStep && "ring-2 ring-ring",
+                        v === 0 && "hover:bg-accent"
+                      )}
+                    />
+                  </div>
                 ))}
               </div>
             ))}
           </div>
         </div>
-        <p className="text-xs text-muted-foreground">
-          Drums export on MIDI channel 10 (General MIDI percussion), so any DAW
-          drum kit plays them.
+        <p id="drum-grid-help" className="text-xs text-muted-foreground">
+          Arrow keys move between steps; Space or Enter adds a hit, accents it,
+          then clears it. Drums export on MIDI channel 10 (General MIDI
+          percussion), so any DAW drum kit plays them.
         </p>
       </CardContent>
     </Card>

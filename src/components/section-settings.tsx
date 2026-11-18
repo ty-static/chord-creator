@@ -32,14 +32,10 @@ import {
   hasSectionStyle,
 } from "@/lib/arrange"
 import { BASS_STYLES, type BassStyle, bassLabel } from "@/lib/bass"
+import { CHORD_STYLES, chordStyleLabel } from "@/lib/rhythm"
 import { type Key, keyLabel, sectionKey } from "@/lib/music"
 import type { SetOptions } from "@/lib/use-history"
 
-const STYLE_LABELS: Record<ChordStyle, string> = {
-  block: "Block",
-  pulse: "Pulse",
-  arpeggio: "Arp",
-}
 const TRACK_LABELS: Record<TrackName, string> = {
   chords: "Chords",
   melody: "Melody",
@@ -69,7 +65,7 @@ export function sectionStyleSummary(
       `no ${silent.map((t) => TRACK_LABELS[t].toLowerCase()).join(", ")}`
     )
   if (section.chordStyle)
-    out.push(STYLE_LABELS[section.chordStyle].toLowerCase())
+    out.push(chordStyleLabel(section.chordStyle).toLowerCase())
   if (section.bassStyle && bass)
     out.push(`${bassLabel(section.bassStyle).toLowerCase()} bass`)
   const energy = section.energy ?? 1
@@ -156,7 +152,11 @@ export function SectionSettings({
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="flex w-80 flex-col gap-4">
+      <PopoverContent
+        align="end"
+        aria-label={`How ${section.name} plays`}
+        className="flex w-80 flex-col gap-4"
+      >
         <div>
           <p className="font-heading font-semibold">How {section.name} plays</p>
           <p className="text-xs text-muted-foreground">
@@ -193,31 +193,31 @@ export function SectionSettings({
 
         <div className="flex flex-col gap-2">
           <Label>Chord rhythm</Label>
-          <ToggleGroup
-            type="single"
-            variant="outline"
-            className="w-full"
+          <Select
             value={section.chordStyle ?? "song"}
             onValueChange={(v) =>
-              v &&
               onChange({
                 chordStyle: v === "song" ? undefined : (v as ChordStyle),
               })
             }
           >
-            <ToggleGroupItem
-              value="song"
-              className="flex-1 text-xs"
-              title={`Use the song's rhythm (${STYLE_LABELS[songChordStyle]})`}
+            <SelectTrigger
+              aria-label="Chord rhythm for this section"
+              className="w-full"
             >
-              Song
-            </ToggleGroupItem>
-            {(Object.keys(STYLE_LABELS) as ChordStyle[]).map((s) => (
-              <ToggleGroupItem key={s} value={s} className="flex-1 text-xs">
-                {STYLE_LABELS[s]}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="song">
+                Song ({chordStyleLabel(songChordStyle)})
+              </SelectItem>
+              {CHORD_STYLES.map((s) => (
+                <SelectItem key={s.value} value={s.value} title={s.hint}>
+                  {s.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="flex flex-col gap-2">

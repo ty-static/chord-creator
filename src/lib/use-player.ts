@@ -4,6 +4,7 @@ import type { TrackName } from "@/lib/arrange"
 import { type Voice, engine } from "@/lib/audio-engine"
 import type { TrackInstruments } from "@/lib/instruments"
 import {
+  type CountIn,
   type PlaySettings,
   type Transport,
   advance,
@@ -99,7 +100,7 @@ export function usePlayer() {
   )
 
   const play = React.useCallback(
-    async (settings: PlaySettings, from: number) => {
+    async (settings: PlaySettings, from: number, countIn?: CountIn) => {
       stop()
       if (settings.end <= 0) return
       const token = tokenRef.current
@@ -122,6 +123,7 @@ export function usePlayer() {
           settings: latest,
           from,
           now: ctx.currentTime,
+          countIn,
         }),
         instrumentsKey: instrumentsKey(settings.instruments),
       }

@@ -272,3 +272,79 @@ export function setMeter(song: Song, meter: MeterId): Song {
   else out.meter = meter
   return out
 }
+
+/** Bars an intro or outro takes at most. */
+export const INTRO_BARS = 4
+
+/** The first `bars` bars of a section's chords (cutting the last one short). */
+function firstBars(section: Section, beats: number) {
+  const out: Chord[] = []
+  let t = 0
+  for (const c of section.chords) {
+    if (t >= beats) break
+    out.push({ ...c, id: uid(), beats: Math.min(c.beats, beats - t) })
+    t += c.beats
+  }
+  return out
+}
+
+/** The last `beats` beats of a section's chords. */
+function lastBars(section: Section, beats: number) {
+  const out: Chord[] = []
+  let t = 0
+  for (const c of [...section.chords].reverse()) {
+    if (t >= beats) break
+    out.unshift({ ...c, id: uid(), beats: Math.min(c.beats, beats - t) })
+    t += c.beats
+  }
+  return out
+}
+
+/**
+ * A new Intro at the start of the form: the opening bars of the first
+ * section's chords, with no melody, softer, and a drum fill into the song.
+ */
+export function addIntro(song: Song): { song: Song; section: Section } | null {
+  const first = sectionOf(song, 0)
+  if (!first || song.sections.length >= MAX_SECTIONS) return null
+  const beats = INTRO_BARS * barBeats(meterOf(song.meter))
+  const section: Section = {
+    ...makeSection(freeName(song, "Intro"), firstBars(first, beats), [], {
+      ...structuredClone(first.drums),
+      fill: true,
+      crashAtStart: false,
+    }),
+    energy: 0.85,
+    ...(first.transpose ? { transpose: first.transpose } : {}),
+  }
+  return { song: addSection(song, section, 0), section }
+}
+
+/**
+ * A new Outro at the end of the form: the closing bars of the last
+ * section's chords, without the melody, getting softer.
+ */
+export function addOutro(song: Song): { song: Song; section: Section } | null {
+  const last = sectionOf(song, song.arrangement.length - 1)
+  if (!last || song.sections.length >= MAX_SECTIONS) return null
+  const beats = INTRO_BARS * barBeats(meterOf(song.meter))
+  const section: Section = {
+    ...makeSection(freeName(song, "Outro"), lastBars(last, beats), [], {
+      ...structuredClone(last.drums),
+      fill: false,
+      crashAtStart: false,
+    }),
+    energy: 0.85,
+    ...(last.transpose ? { transpose: last.transpose } : {}),
+  }
+  return { song: addSection(song, section), section }
+}
+
+function sectionOf(song: Song, slot: number) {
+  const id = song.arrangement[slot]?.section
+  return song.sections.find((s) => s.id === id)
+}
+
+/** "Intro", or "Intro 2" if the song already has one. */
+const freeName = (song: Song, name: string) =>
+  song.sections.some((s) => s.name === name) ? variantName(song, name) : name
