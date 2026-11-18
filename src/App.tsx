@@ -91,9 +91,13 @@ import {
   type Section,
   buildEvents,
   endingBeats,
+  barLines,
   keyChanges,
   layout,
+  meterChanges,
   placedAt,
+  sectionMeter,
+  songBars,
 } from "@/lib/arrange"
 import { type Release, type TrackMix, engine } from "@/lib/audio-engine"
 import { chordFromPitches, foldDegree, nearestDegree } from "@/lib/harmony"
@@ -147,6 +151,7 @@ import {
   formString,
   sectionLetter,
   setMeter,
+  setSectionMeter,
   updateSection,
 } from "@/lib/sections"
 import {
@@ -332,12 +337,32 @@ export function App() {
   const sectionIndex = song.sections.indexOf(section)
   const patchSection = (p: Partial<Omit<Section, "id">>, opts?: SetOptions) =>
     history.set((s) => updateSection(s, section.id, p), opts)
+  /** Section style changes. A time signature also refits the section's
+   *  chords, melody and drums, so it goes through setSectionMeter. */
+  const patchSectionStyle = (
+    p: Partial<Omit<Section, "id">>,
+    opts?: SetOptions
+  ) => {
+    if (!("meter" in p)) return patchSection(p, opts)
+    const { meter, ...rest } = p
+    history.set(
+      (s) =>
+        updateSection(setSectionMeter(s, section.id, meter), section.id, rest),
+      opts
+    )
+    // A loop over bars no longer lines up with them.
+    if (meter !== section.meter && loopTarget && "start" in loopTarget)
+      setLoopTarget(null)
+  }
   const anyDrums = song.sections.some((s) => s.drums.enabled)
   /** The key the selected section plays in (after any key change): the
    *  editors show and build notes in it. */
   const editKey = sectionKey(song.key, section.transpose)
   const meter = meterOf(song.meter)
-  const bar = barBeats(meter)
+  /** The selected section's time signature (its own, or the song's): the
+   *  editors count bars in it. */
+  const editMeter = sectionMeter(song, section)
+  const bar = barBeats(editMeter)
 
   // Fetch the code for dialogs, exports and sound once the page is idle.
   React.useEffect(() => prefetchLazyModules(), [])
@@ -605,10 +630,15 @@ export function App() {
     opts: { loop?: boolean; range?: LoopRange | null; countIn?: boolean } = {}
   ) => {
     if (!beats) return toast.error("Add at least one chord first.")
+    // Count in a bar of the time the music starts in.
+    const at = placedAt(placed, from)
+    const countMeter = at ? sectionMeter(song, at.section) : meter
     void player.play(
       playSettings(opts),
       from,
-      opts.countIn ? { beats: bar, clicks: pulses(meter) } : undefined
+      opts.countIn
+        ? { beats: barBeats(countMeter), clicks: pulses(countMeter) }
+        : undefined
     )
   }
 
@@ -1056,6 +1086,7 @@ export function App() {
     const events = buildEvents(song, SCOPE_LAYERS[scope])
     if (!events.length) return toast.error("Nothing to export yet.")
     const filename = exportName("mid")
+    const meters = meterChanges(song, placed)
     downloadBytes(
       buildMidi(events, {
         bpm: song.bpm,
@@ -1063,7 +1094,10 @@ export function App() {
         title: song.title,
         keySig: keySignature(song.key),
         keyChanges: keyChanges(song.key, placed),
-        timeSig: midiTimeSig(meter),
+        timeSig: midiTimeSig(meters[0].meter),
+        timeSigChanges: meters
+          .slice(1)
+          .map((t) => ({ beat: t.beat, timeSig: midiTimeSig(t.meter) })),
         markers:
           song.arrangement.length > 1
             ? placed.map((p) => ({
@@ -1556,8 +1590,8 @@ export function App() {
               <CardDescription>
                 {song.sections.length}{" "}
                 {song.sections.length === 1 ? "section" : "sections"} ·{" "}
-                {+(beats / bar).toFixed(1)} {beats === bar ? "bar" : "bars"} ·{" "}
-                {formString(song)}
+                {+songBars(song).toFixed(1)}{" "}
+                {songBars(song) === 1 ? "bar" : "bars"} · {formString(song)}
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -1665,7 +1699,7 @@ export function App() {
           />
           <Timeline
             musicKey={song.key}
-            beatsPerBar={bar}
+            barLines={barLines(song, placed)}
             parts={timelineParts}
             playheadBeat={
               player.beat === null ? null : Math.min(player.beat, beats)
@@ -1708,8 +1742,9 @@ export function App() {
                 songChordStyle={song.chordStyle}
                 songBassStyle={song.bassStyle ?? "root"}
                 songBpm={song.bpm}
+                songMeter={song.meter}
                 bass={song.bass}
-                onChange={patchSection}
+                onChange={patchSectionStyle}
               />
             </div>
             {!!section.transpose && (
@@ -1735,7 +1770,7 @@ export function App() {
                 voicings={voicings}
                 voiceLeading={song.voiceLeading}
                 musicKey={editKey}
-                meter={meter}
+                meter={editMeter}
                 chords={section.chords}
                 onChange={(chords) => {
                   // Trim melody notes that now fall past the end of the progression.
@@ -1763,7 +1798,7 @@ export function App() {
                 chords={section.chords}
                 melody={section.melody}
                 onChange={(melody) => patchSection({ melody })}
-                barSteps={barSteps(meter)}
+                barSteps={barSteps(editMeter)}
                 playheadBeat={localBeat}
                 onPreview={(m) =>
                   void player.preview([m], "melody", song.instruments.melody)
@@ -1773,7 +1808,7 @@ export function App() {
             <TabsContent value="drums" className="mt-2">
               <DrumEditor
                 drums={section.drums}
-                meter={meter}
+                meter={editMeter}
                 onChange={(drums) => patchSection({ drums })}
                 crashOnChange={!!song.crashOnChange}
                 onCrashOnChange={(on) =>

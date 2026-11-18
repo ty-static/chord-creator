@@ -46,6 +46,9 @@ interface Props {
   onLoopChange: (range: LoopRange | null) => void
   /** Length of a bar in beats (4 in 4/4, 3 in 6/8). */
   beatsPerBar?: number
+  /** Every bar, when they aren't all `beatsPerBar` long (sections in
+   *  another time signature). */
+  barLines?: { start: number; beats: number }[]
 }
 /** Bars never get narrower than this; long songs scroll sideways. */
 const MIN_BAR_PX = 44
@@ -60,10 +63,17 @@ export function Timeline({
   onSelectSection,
   onSeek,
   onLoopChange,
-  beatsPerBar: BEATS_PER_BAR = 4,
+  beatsPerBar = 4,
+  barLines,
 }: Props) {
   const total = parts.reduce((n, p) => n + p.beats, 0)
-  const bars = Math.ceil(total / BEATS_PER_BAR)
+  const barList =
+    barLines ??
+    Array.from({ length: Math.ceil(total / beatsPerBar) }, (_, i) => ({
+      start: i * beatsPerBar,
+      beats: Math.min(beatsPerBar, total - i * beatsPerBar),
+    }))
+  const bars = barList.length
   const laneRef = React.useRef<HTMLDivElement>(null)
   const [drag, setDrag] = React.useState<{
     anchor: number
@@ -77,15 +87,17 @@ export function Timeline({
   const barAt = (e: React.PointerEvent) => {
     const rect = laneRef.current!.getBoundingClientRect()
     const beat = ((e.clientX - rect.left) / rect.width) * total
-    return Math.max(0, Math.min(bars - 1, Math.floor(beat / BEATS_PER_BAR)))
+    const i = barList.findIndex((b) => beat < b.start + b.beats)
+    return i < 0 ? bars - 1 : i
   }
 
   const selection = drag
     ? {
-        start: Math.min(drag.anchor, drag.current) * BEATS_PER_BAR,
+        start: barList[Math.min(drag.anchor, drag.current)].start,
         end: Math.min(
           total,
-          (Math.max(drag.anchor, drag.current) + 1) * BEATS_PER_BAR
+          barList[Math.max(drag.anchor, drag.current)].start +
+            barList[Math.max(drag.anchor, drag.current)].beats
         ),
       }
     : loopRange
@@ -181,21 +193,17 @@ export function Timeline({
             onPointerUp={(e) => {
               if (!drag || e.pointerId !== drag.pointerId) return
               if (drag.anchor === drag.current)
-                onSeek(drag.anchor * BEATS_PER_BAR)
+                onSeek(barList[drag.anchor].start)
               else if (selection) onLoopChange(selection)
               setDrag(null)
             }}
             onPointerCancel={() => setDrag(null)}
           >
-            {Array.from({ length: bars }, (_, i) => (
+            {barList.map((b, i) => (
               <div
                 key={i}
                 className="flex shrink-0 items-center border-l px-1.5 font-mono text-[10px] text-muted-foreground first:border-l-0 hover:bg-muted"
-                style={{
-                  width: pct(
-                    Math.min(BEATS_PER_BAR, total - i * BEATS_PER_BAR)
-                  ),
-                }}
+                style={{ width: pct(b.beats) }}
               >
                 {i + 1}
               </div>

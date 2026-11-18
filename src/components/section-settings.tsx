@@ -34,6 +34,7 @@ import {
 import { BASS_STYLES, type BassStyle, bassLabel } from "@/lib/bass"
 import { CHORD_STYLES, chordStyleLabel } from "@/lib/rhythm"
 import { type Key, keyLabel, sectionKey } from "@/lib/music"
+import { METERS, type MeterId, meterOf } from "@/lib/meter"
 import { SECTION_TEMPOS, sectionTempoLabel } from "@/lib/tempo"
 import type { SetOptions } from "@/lib/use-history"
 
@@ -81,6 +82,7 @@ export function sectionStyleSummary(
   if (section.tempo && section.tempo !== 100)
     out.push(sectionTempoLabel(section.tempo).toLowerCase())
   if (section.slowDown) out.push("slows down")
+  if (section.meter) out.push(`in ${section.meter}`)
   return out
 }
 
@@ -96,6 +98,7 @@ type Patch = Partial<
     | "tempo"
     | "slowDown"
     | "drums"
+    | "meter"
   >
 >
 
@@ -105,6 +108,7 @@ export function SectionSettings({
   songChordStyle,
   songBassStyle,
   songBpm,
+  songMeter,
   bass,
   onChange,
 }: {
@@ -113,6 +117,7 @@ export function SectionSettings({
   songChordStyle: ChordStyle
   songBassStyle: BassStyle
   songBpm: number
+  songMeter?: MeterId
   /** Whether the song has a bass line at all. */
   bass: boolean
   onChange: (patch: Patch, opts?: SetOptions) => void
@@ -149,7 +154,7 @@ export function SectionSettings({
           variant="outline"
           size="sm"
           className="relative"
-          title="Which tracks play, chord rhythm, energy, tempo and key change for this section"
+          title="Which tracks play, chord rhythm, energy, tempo, time signature and key change for this section"
         >
           <SlidersHorizontalIcon /> Section style
           {changed && (
@@ -361,6 +366,37 @@ export function SectionSettings({
         </div>
 
         <div className="flex flex-col gap-2">
+          <Label>Time signature</Label>
+          <Select
+            value={section.meter ?? "song"}
+            onValueChange={(v) =>
+              onChange({ meter: v === "song" ? undefined : (v as MeterId) })
+            }
+          >
+            <SelectTrigger
+              aria-label="Time signature for this section"
+              className="w-full"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="song">
+                Song ({meterOf(songMeter).label})
+              </SelectItem>
+              {METERS.filter((m) => m.id !== meterOf(songMeter).id).map((m) => (
+                <SelectItem key={m.id} value={m.id} title={m.hint}>
+                  {m.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Chord lengths, the melody and the drum beat are fitted to the new
+            bar.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2">
           <Label>Key change</Label>
           <div className="flex items-center gap-2">
             <Button
@@ -414,6 +450,7 @@ export function SectionSettings({
                 buildUp: undefined,
                 tempo: undefined,
                 slowDown: undefined,
+                meter: undefined,
               })
             }
           >

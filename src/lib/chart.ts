@@ -3,7 +3,7 @@
 // the chord chart dialog, its printout and its plain-text copy.
 
 import type { Song } from "@/lib/arrange"
-import { ENDINGS, layout } from "@/lib/arrange"
+import { ENDINGS, layout, sectionMeter } from "@/lib/arrange"
 import {
   type Chord,
   type Key,
@@ -102,7 +102,6 @@ export function barsOf(
 export function chordChart(song: Song, opts: ChartOptions = {}): Chart {
   const transpose = opts.numerals ? 0 : (opts.transpose ?? 0)
   const meter = meterOf(song.meter)
-  const bar = barBeats(meter)
   const key = chartKey(song.key, transpose)
 
   const placed = layout(song).filter((p) => p.beats > 0)
@@ -122,7 +121,9 @@ export function chordChart(song: Song, opts: ChartOptions = {}): Chart {
     // Numerals stay in the song's key: a key change shows as a note.
     const name = (c: Chord) =>
       opts.numerals ? romanNumeral(c, song.key) : chordName(c, k)
+    const own = sectionMeter(song, s)
     const notes: string[] = []
+    if (own.id !== meter.id) notes.push(`In ${own.label}`)
     if (s.transpose)
       notes.push(`Key of ${keyLabel(sectionKey(key, s.transpose))}`)
     if ((s.tempo ?? 100) !== 100)
@@ -135,7 +136,7 @@ export function chordChart(song: Song, opts: ChartOptions = {}): Chart {
       {
         letter: sectionLetter(i),
         name: s.name,
-        bars: barsOf(s.chords, bar, name),
+        bars: barsOf(s.chords, barBeats(own), name),
         notes,
       },
     ]

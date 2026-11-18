@@ -56,6 +56,10 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
 - **Tempo changes** — a section can play at its own tempo (half time, a
   little faster, double time…) and slow down over its last bars. Playback,
   the playhead, WAV and MIDI export (as tempo events) all follow the changes.
+- **Time signature per section** — a section can play in a time of its own,
+  like a bridge in 3/4 in a 4/4 song. Its chords, melody and drum beat are
+  fitted to the new bar; the editors, timeline, count-in, chord chart and MIDI
+  export (as time-signature events) count bars in each section's time.
 - **Bass patterns** — roots, root–fifth, octaves, a walking line that steps
   into the next chord, a syncopated groove, or following the kick drum. Set
   for the song and changed per section.

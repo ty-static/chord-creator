@@ -1,7 +1,7 @@
 // Song sections (verse, chorus, bridge…) and the form that orders them.
 // Everything here is pure: each function returns a new song.
 
-import type { Section, Slot, Song } from "@/lib/arrange"
+import { type Section, type Slot, type Song, sectionMeter } from "@/lib/arrange"
 import { DEFAULT_DRUMS, type DrumSettings, patternFor } from "@/lib/drums"
 import { type MeterId, barBeats, meterOf } from "@/lib/meter"
 import { type Chord, type MelodyNote, STEPS_PER_BEAT, uid } from "@/lib/music"
@@ -105,6 +105,7 @@ export function copySection(section: Section, name: string): Section {
     buildUp: section.buildUp,
     tempo: section.tempo,
     slowDown: section.slowDown,
+    meter: section.meter,
   }
 }
 
@@ -230,49 +231,91 @@ export function migrateSong(
 }
 
 /**
- * Move a song to another time signature. Every length is stretched or
- * squeezed by the change in bar length, so a chord that filled a bar still
- * fills one (and a half-bar chord stays half a bar); melodies move with
- * them, and each drum beat becomes the same groove in the new time (or the
- * old pattern fitted to the new bar).
+ * A section moved from one time signature to another. Every length is
+ * stretched or squeezed by the change in bar length, so a chord that filled
+ * a bar still fills one (and a half-bar chord stays half a bar); the melody
+ * moves with it, and the drum beat becomes the same groove in the new time
+ * (or the old pattern fitted to the new bar).
+ */
+function convertSection(s: Section, from: MeterId, to: MeterId): Section {
+  if (from === to) return s
+  const ratio = barBeats(meterOf(to)) / barBeats(meterOf(from))
+  const chords = s.chords.map((c) => ({
+    ...c,
+    beats: Math.max(1, Math.round(c.beats * ratio * 2) / 2),
+  }))
+  const steps = chords.reduce((n, c) => n + c.beats, 0) * STEPS_PER_BEAT
+  const melody: MelodyNote[] = []
+  for (const n of [...s.melody].sort((a, b) => a.start - b.start)) {
+    const start = Math.round(n.start * ratio)
+    const prev = melody[melody.length - 1]
+    if (start >= steps || (prev && prev.start >= start)) continue
+    if (prev && prev.start + prev.length > start)
+      prev.length = start - prev.start
+    melody.push({
+      ...n,
+      start,
+      length: Math.max(
+        1,
+        Math.min(Math.round(n.length * ratio), steps - start)
+      ),
+    })
+  }
+  return {
+    ...s,
+    chords,
+    melody,
+    drums: { ...s.drums, pattern: patternFor(s.drums.pattern, from, to) },
+  }
+}
+
+/**
+ * Move a song to another time signature (see convertSection). A section in
+ * a time of its own keeps it; one already in the new time now just follows
+ * the song.
  */
 export function setMeter(song: Song, meter: MeterId): Song {
   const from = song.meter ?? "4/4"
   if (from === meter) return song
-  const ratio = barBeats(meterOf(meter)) / barBeats(meterOf(from))
   const sections = song.sections.map((s) => {
-    const chords = s.chords.map((c) => ({
-      ...c,
-      beats: Math.max(1, Math.round(c.beats * ratio * 2) / 2),
-    }))
-    const steps = chords.reduce((n, c) => n + c.beats, 0) * STEPS_PER_BEAT
-    const melody: MelodyNote[] = []
-    for (const n of [...s.melody].sort((a, b) => a.start - b.start)) {
-      const start = Math.round(n.start * ratio)
-      const prev = melody[melody.length - 1]
-      if (start >= steps || (prev && prev.start >= start)) continue
-      if (prev && prev.start + prev.length > start)
-        prev.length = start - prev.start
-      melody.push({
-        ...n,
-        start,
-        length: Math.max(
-          1,
-          Math.min(Math.round(n.length * ratio), steps - start)
-        ),
-      })
-    }
-    return {
-      ...s,
-      chords,
-      melody,
-      drums: { ...s.drums, pattern: patternFor(s.drums.pattern, from, meter) },
-    }
+    if (!s.meter) return convertSection(s, from, meter)
+    if (s.meter !== meter) return s
+    const out = { ...s }
+    delete out.meter
+    return out
   })
   const out: Song = { ...song, sections }
   if (meter === "4/4") delete out.meter
   else out.meter = meter
   return out
+}
+
+/**
+ * Give one section a time signature of its own (or, with the song's or
+ * undefined, back to the song's), fitting its chords, melody and drums to
+ * the new bar.
+ */
+export function setSectionMeter(
+  song: Song,
+  id: string,
+  meter: MeterId | undefined
+): Song {
+  const songMeter = song.meter ?? "4/4"
+  const to = meter ?? songMeter
+  return {
+    ...song,
+    sections: song.sections.map((s) => {
+      if (s.id !== id) return s
+      const out = convertSection(s, s.meter ?? songMeter, to)
+      if (to === songMeter) {
+        if (!out.meter) return out
+        const copy = { ...out }
+        delete copy.meter
+        return copy
+      }
+      return { ...out, meter: to }
+    }),
+  }
 }
 
 /** Bars an intro or outro takes at most. */
@@ -309,7 +352,7 @@ function lastBars(section: Section, beats: number) {
 export function addIntro(song: Song): { song: Song; section: Section } | null {
   const first = sectionOf(song, 0)
   if (!first || song.sections.length >= MAX_SECTIONS) return null
-  const beats = INTRO_BARS * barBeats(meterOf(song.meter))
+  const beats = INTRO_BARS * barBeats(sectionMeter(song, first))
   const section: Section = {
     ...makeSection(freeName(song, "Intro"), firstBars(first, beats), [], {
       ...structuredClone(first.drums),
@@ -318,6 +361,7 @@ export function addIntro(song: Song): { song: Song; section: Section } | null {
     }),
     energy: 0.85,
     ...(first.transpose ? { transpose: first.transpose } : {}),
+    ...(first.meter ? { meter: first.meter } : {}),
   }
   return { song: addSection(song, section, 0), section }
 }
@@ -329,7 +373,7 @@ export function addIntro(song: Song): { song: Song; section: Section } | null {
 export function addOutro(song: Song): { song: Song; section: Section } | null {
   const last = sectionOf(song, song.arrangement.length - 1)
   if (!last || song.sections.length >= MAX_SECTIONS) return null
-  const beats = INTRO_BARS * barBeats(meterOf(song.meter))
+  const beats = INTRO_BARS * barBeats(sectionMeter(song, last))
   const section: Section = {
     ...makeSection(freeName(song, "Outro"), lastBars(last, beats), [], {
       ...structuredClone(last.drums),
@@ -339,6 +383,7 @@ export function addOutro(song: Song): { song: Song; section: Section } | null {
     energy: 0.85,
     ...(last.transpose ? { transpose: last.transpose } : {}),
     ...(last.tempo ? { tempo: last.tempo } : {}),
+    ...(last.meter ? { meter: last.meter } : {}),
     slowDown: true,
   }
   return { song: addSection(song, section), section }

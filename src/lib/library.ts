@@ -2,8 +2,7 @@
 // its own, plus a small index for listing, so a tab only rewrites the song
 // it has open.
 
-import { layout, type Song } from "@/lib/arrange"
-import { barBeats, meterOf } from "@/lib/meter"
+import { type Song, songBars } from "@/lib/arrange"
 import { keyLabel, uid } from "@/lib/music"
 import { normalizeSong } from "@/lib/song-file"
 
@@ -25,8 +24,7 @@ export interface LibraryEntry {
 type Store = Pick<Storage, "getItem" | "setItem" | "removeItem">
 
 export function summarize(song: Song) {
-  const beats = layout(song).reduce((n, p) => n + p.beats, 0)
-  const bars = Math.round(beats / barBeats(meterOf(song.meter)))
+  const bars = Math.round(songBars(song))
   const sections = song.sections.length
   return [
     keyLabel(song.key),

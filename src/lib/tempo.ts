@@ -3,8 +3,8 @@
 // list of tempo changes in beats, used by playback, WAV and MIDI export.
 
 import type { Song } from "@/lib/arrange"
-import { layout } from "@/lib/arrange"
-import { barBeats, meterOf } from "@/lib/meter"
+import { layout, sectionMeter } from "@/lib/arrange"
+import { barBeats } from "@/lib/meter"
 
 export interface TempoChange {
   /** From this beat of the song on… */
@@ -44,8 +44,8 @@ export function tempoMap(song: Song): TempoChange[] {
     else out.push({ beat, bpm })
   }
   push(0, song.bpm)
-  const bar = barBeats(meterOf(song.meter))
   for (const p of layout(song)) {
+    const bar = barBeats(sectionMeter(song, p.section))
     const bpm = (song.bpm * (p.section.tempo ?? 100)) / 100
     push(p.start, bpm)
     if (!p.section.slowDown || p.beats <= 0) continue

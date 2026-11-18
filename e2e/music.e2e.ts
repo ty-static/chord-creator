@@ -227,3 +227,32 @@ test("plays a section at its own tempo", async ({ page }) => {
   )
   await expect(page.getByLabel("Slow down at the end")).toBeChecked()
 })
+
+test("plays a section in a time signature of its own", async ({ page }) => {
+  await openApp(page)
+  await loadExample(page, "Pop Anthem")
+  // Six sections of four bars of 4/4.
+  await expect(page.getByText(/· 24 bars ·/)).toBeVisible()
+  await editSection(page, "Chorus")
+  await page.getByRole("button", { name: "Section style" }).click()
+  await page.getByLabel("Time signature for this section").click()
+  await page.getByRole("option", { name: "3/4", exact: true }).click()
+  await page.keyboard.press("Escape")
+  await expect(page.getByText(/in 3\/4/).first()).toBeVisible()
+  // Still 24 bars: the chorus's four bars are now bars of 3/4.
+  await expect(page.getByText(/· 24 bars ·/)).toBeVisible()
+  // The chord editor counts in the section's time.
+  await expect(page.getByText("1 bar", { exact: true }).first()).toBeVisible()
+
+  await page.getByRole("button", { name: "Play", exact: true }).click()
+  await expect(
+    page.getByRole("button", { name: "Stop", exact: true })
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Stop", exact: true }).click()
+  await page.reload()
+  await editSection(page, "Chorus")
+  await page.getByRole("button", { name: "Section style" }).click()
+  await expect(
+    page.getByLabel("Time signature for this section")
+  ).toContainText("3/4")
+})

@@ -66,6 +66,8 @@ export interface Section {
   tempo?: number
   /** Slow down over the last bars (a ritardando). */
   slowDown?: boolean
+  /** Time signature for this section only, e.g. one bar of 2/4 in a 4/4 song. */
+  meter?: MeterId
 }
 
 /** Beats a build-up takes at most, and how much louder it ends. */
@@ -89,7 +91,8 @@ export const hasSectionStyle = (s: Section) =>
   !!s.transpose ||
   !!s.buildUp ||
   (s.tempo ?? 100) !== 100 ||
-  !!s.slowDown
+  !!s.slowDown ||
+  !!s.meter
 
 /** One place in the song's form. The same section can appear in many slots. */
 export interface Slot {
@@ -153,11 +156,60 @@ export const ENDINGS: { value: Ending; label: string; hint: string }[] = [
 export const FADE_BARS = 4
 const FADE_TO = 0.2
 
+/** The time signature a section plays in: its own, or the song's. */
+export const sectionMeter = (
+  song: Pick<Song, "meter">,
+  section: Pick<Section, "meter">
+) => meterOf(section.meter ?? song.meter)
+
+/** Bars in the song (each section counted in its own time signature). */
+export function songBars(song: Song) {
+  return layout(song).reduce(
+    (n, p) => n + p.beats / barBeats(sectionMeter(song, p.section)),
+    0
+  )
+}
+
+/** The bars of the form, each with where it starts and how long it is. A
+ *  section that doesn't fill its last bar ends with a short one. */
+export function barLines(song: Song, placed = layout(song)) {
+  const out: { start: number; beats: number }[] = []
+  for (const p of placed) {
+    const bar = barBeats(sectionMeter(song, p.section))
+    for (let b = 0; b < p.beats - 1e-9; b += bar)
+      out.push({ start: p.start + b, beats: Math.min(bar, p.beats - b) })
+  }
+  return out
+}
+
+/** Where the time signature changes, for MIDI export: the song's at beat 0,
+ *  then one wherever a section in another time starts. */
+export function meterChanges(song: Song, placed = layout(song)) {
+  const out = [{ beat: 0, meter: meterOf(song.meter) }]
+  for (const p of placed) {
+    if (!p.beats) continue
+    const m = sectionMeter(song, p.section)
+    const last = out.at(-1)!
+    if (last.meter.id === m.id) continue
+    if (Math.abs(last.beat - p.start) < 1e-9) last.meter = m
+    else out.push({ beat: p.start, meter: m })
+  }
+  return out
+}
+
 /** Beats the ending adds after the form (the bar of a final chord or stab). */
 export const endingBeats = (song: Song) =>
   song.ending === "hold" || song.ending === "stab"
-    ? barBeats(meterOf(song.meter))
+    ? barBeats(endingMeter(song))
     : 0
+
+/** The ending plays in the time of the last section. */
+function endingMeter(song: Song) {
+  const last = layout(song)
+    .filter((p) => p.beats > 0)
+    .at(-1)
+  return last ? sectionMeter(song, last.section) : meterOf(song.meter)
+}
 
 /** What one section needs to become notes. */
 export type Part = Pick<
@@ -175,7 +227,7 @@ export const partOf = (song: Song, section: Section): Part => ({
   bass: song.bass,
   bassStyle: section.bassStyle ?? song.bassStyle,
   voiceLeading: song.voiceLeading,
-  meter: song.meter,
+  meter: section.meter ?? song.meter,
   chords: section.chords,
   melody: section.melody,
   drums: section.drums,
@@ -315,7 +367,7 @@ function withEnding(
   const last = placed.filter((p) => p.beats > 0).at(-1)
   if (!last) return events
   const end = last.start + last.beats
-  const bar = barBeats(meterOf(song.meter))
+  const bar = barBeats(sectionMeter(song, last.section))
 
   if (song.ending === "fade") {
     const length = Math.min(FADE_BARS * bar, end)

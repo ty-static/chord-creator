@@ -58,7 +58,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { ENDINGS, type Placed, type Section, type Song } from "@/lib/arrange"
+import {
+  ENDINGS,
+  type Placed,
+  type Section,
+  type Song,
+  sectionMeter,
+} from "@/lib/arrange"
+import { patternFor } from "@/lib/drums"
 import {
   Select,
   SelectContent,
@@ -154,9 +161,17 @@ export function SongForm({
           },
         ],
         [],
-        structuredClone(selected?.drums ?? song.sections[0].drums)
+        drumsLike(selected ?? song.sections[0])
       )
     )
+  /** A section's drums, in the song's time (a new section plays in it). */
+  const drumsLike = (s: Section) => {
+    const drums = structuredClone(s.drums)
+    const songMeter = song.meter ?? "4/4"
+    if (s.meter && s.meter !== songMeter)
+      drums.pattern = patternFor(drums.pattern, s.meter, songMeter)
+    return drums
+  }
 
   const placedBySlot = new Map(placed.map((p) => [p.slot.id, p]))
 
@@ -215,7 +230,7 @@ export function SongForm({
                     section={section}
                     bars={
                       +(
-                        (p?.beats ?? 0) / barBeats(meterOf(song.meter))
+                        (p?.beats ?? 0) / barBeats(sectionMeter(song, section))
                       ).toFixed(1)
                     }
                     selected={section.id === selectedId}

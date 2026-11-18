@@ -166,6 +166,8 @@ function section(
   meter: MeterId = "4/4"
 ): Section | null {
   if (!isObj(x)) return null
+  // A section in a time of its own (only kept when it differs from the song's).
+  const own = isMeterId(x.meter) && x.meter !== meter ? x.meter : undefined
   const chords = (Array.isArray(x.chords) ? x.chords : [])
     .slice(0, MAX_CHORDS)
     .map(chord)
@@ -194,7 +196,7 @@ function section(
     name: str(x.name, `Section ${index + 1}`, 24),
     chords,
     melody: clean,
-    drums: drums(x.drums, meter),
+    drums: drums(x.drums, own ?? meter),
     // Only kept when they differ from the song, so files stay small.
     ...(tacet.length ? { tacet } : {}),
     ...(isChordStyle(x.chordStyle)
@@ -208,6 +210,7 @@ function section(
     ...(x.buildUp === true ? { buildUp: true } : {}),
     ...(tempo !== 100 ? { tempo } : {}),
     ...(x.slowDown === true ? { slowDown: true } : {}),
+    ...(own ? { meter: own } : {}),
   }
 }
 
@@ -399,6 +402,7 @@ function compact(song: Song) {
       buildUp: s.buildUp,
       tempo: s.tempo,
       slowDown: s.slowDown,
+      meter: s.meter,
       drums: s.drums,
       ...notesOf(s),
     })),

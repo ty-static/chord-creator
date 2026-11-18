@@ -1,6 +1,11 @@
 import type { ChordStyle, Section, Song } from "@/lib/arrange"
 import { DEFAULT_MIX } from "@/lib/audio-engine"
-import { DEFAULT_DRUMS, type DrumSettings, presetPattern } from "@/lib/drums"
+import {
+  DEFAULT_DRUMS,
+  type DrumSettings,
+  patternFor,
+  presetPattern,
+} from "@/lib/drums"
 import { makeSection } from "@/lib/sections"
 import { type MeterId, barBeats, barSteps, meterOf } from "@/lib/meter"
 import type { TrackInstruments } from "@/lib/instruments"
@@ -311,6 +316,16 @@ export const EXAMPLES: Example[] = RAW_EXAMPLES.map((ex) => ({
   build: () => ({ ...ex.build(), title: ex.label }),
 }))
 
+/** The first section's drums, fitted to the song's time signature. */
+function drumsIn(song: Song): DrumSettings {
+  const first = song.sections[0]
+  if (!first) return structuredClone(DEFAULT_DRUMS)
+  const drums = structuredClone(first.drums)
+  if (first.meter && first.meter !== (song.meter ?? "4/4"))
+    drums.pattern = patternFor(drums.pattern, first.meter, song.meter ?? "4/4")
+  return drums
+}
+
 /** A nearly empty song: one section with a tonic chord and no melody. */
 export function blankSong(previous: Song): Song {
   const section = makeSection(
@@ -325,7 +340,7 @@ export function blankSong(previous: Song): Song {
       },
     ],
     [],
-    structuredClone(previous.sections[0]?.drums ?? DEFAULT_DRUMS)
+    drumsIn(previous)
   )
   return {
     ...previous,
