@@ -54,6 +54,18 @@ test.describe("accessibility (axe)", () => {
       expect(await violations(page, "[data-sonner-toaster]")).toEqual([])
     })
 
+  for (const scheme of ["light", "dark"] as const)
+    test(`the chord chart, ${scheme} theme`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: scheme })
+      await openApp(page)
+      await loadExample(page, "Pop Anthem")
+      await page.getByRole("button", { name: "Chord chart" }).click()
+      await expect(
+        page.getByRole("dialog", { name: "Chord chart" })
+      ).toBeVisible()
+      expect(await violations(page)).toEqual([])
+    })
+
   test("section style, My songs and the phone layout", async ({ page }) => {
     await openApp(page)
     await loadExample(page, "Pop Anthem")

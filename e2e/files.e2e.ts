@@ -121,3 +121,46 @@ test("downloads a song file and opens it again", async ({ page }) => {
   await page.locator('input[type="file"]').setInputFiles(asFile(file))
   await expect(page.locator("header")).toContainText("Epic Score")
 })
+
+test.describe("chord chart", () => {
+  test.use({ permissions: ["clipboard-read", "clipboard-write"] })
+
+  test("shows the chords bar by bar, copies and prints them", async ({
+    page,
+  }) => {
+    await openApp(page)
+    await loadExample(page, "Pop Anthem")
+    await page.getByRole("button", { name: "Chord chart" }).click()
+    const dialog = page.getByRole("dialog", { name: "Chord chart" })
+    const verse = dialog.getByRole("region", { name: "A Verse" })
+    await expect(dialog).toContainText("C Major · 112 BPM · 4/4")
+    await expect(dialog).toContainText("Form: A Verse · B Chorus")
+    await expect(verse.getByLabel("Bar 1")).toHaveText("Am")
+
+    // Numerals, then back to names in another key.
+    await dialog.getByRole("radio", { name: "Numerals" }).click()
+    await expect(verse.getByLabel("Bar 1")).toHaveText("vi")
+    await dialog.getByRole("radio", { name: "Chord names" }).click()
+    await dialog.getByRole("combobox", { name: "Key" }).click()
+    await page.getByRole("option", { name: /^D Major/ }).click()
+    await expect(dialog).toContainText("D Major · 112 BPM")
+    await expect(verse.getByLabel("Bar 1")).toHaveText("Bm")
+
+    await dialog.getByRole("button", { name: "Copy as text" }).click()
+    await expect(dialog.getByRole("button", { name: "Copied" })).toBeVisible()
+    // (Windows hands the lines back ending in \r\n.)
+    const text = (
+      await page.evaluate(() => navigator.clipboard.readText())
+    ).replace(/\r\n/g, "\n")
+    expect(text).toContain("Pop Anthem\nKey: D Major")
+    expect(text).toMatch(/\[A\] Verse\n\| Bm +\| G +\| D +\| A +\|/)
+
+    // On paper: only the chart.
+    await page.emulateMedia({ media: "print" })
+    await expect(dialog).toBeHidden()
+    await expect(page.locator("#print-chart")).toBeVisible()
+    await expect(page.locator("#print-chart")).toContainText("Bm")
+    await page.emulateMedia({ media: "screen" })
+    await expect(page.locator("#print-chart")).toBeHidden()
+  })
+})

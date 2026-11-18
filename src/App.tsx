@@ -6,6 +6,7 @@ import {
   LinkIcon,
   CircleHelpIcon,
   EllipsisVerticalIcon,
+  FileMusicIcon,
   FilePlusIcon,
   KeyboardIcon,
   LayersIcon,
@@ -169,6 +170,11 @@ const WelcomeTour = React.lazy(() =>
 )
 const SongLibrary = React.lazy(() =>
   import("@/components/song-library").then((m) => ({ default: m.SongLibrary }))
+)
+const ChordChartDialog = React.lazy(() =>
+  import("@/components/chord-chart").then((m) => ({
+    default: m.ChordChartDialog,
+  }))
 )
 const ShareLinkDialog = React.lazy(() =>
   import("@/components/song-library").then((m) => ({
@@ -801,6 +807,7 @@ export function App() {
 
   // Share links: the whole song is packed into the link's #hash.
   const [manualShare, setManualShare] = React.useState<string | null>(null)
+  const [chartOpen, setChartOpen] = React.useState(false)
   const shareSong = async () => {
     const url = await shareUrl(song, window.location.href)
     const long = url.length > 8000
@@ -1627,14 +1634,18 @@ export function App() {
                   </>
                 )}
               </Button>
+              <Button variant="outline" onClick={() => setChartOpen(true)}>
+                <FileMusicIcon /> Chord chart
+              </Button>
               <Button variant="secondary" onClick={() => void shareSong()}>
                 <LinkIcon /> Copy share link
               </Button>
               <p className="text-xs text-muted-foreground">
                 MIDI keeps separate tracks, tempo and key for your DAW. WAV is
                 the finished sound — your instruments, mix and reverb. Stems are
-                one WAV per track in a zip, lined up to mix in a DAW. A share
-                link sends the whole song for others to open and edit.
+                one WAV per track in a zip, lined up to mix in a DAW. A chord
+                chart is the chords bar by bar, to print or copy. A share link
+                sends the whole song for others to open and edit.
               </p>
             </CardContent>
           </Card>
@@ -1811,6 +1822,13 @@ export function App() {
           onDelete={deleteSong}
           onBackup={backupAll}
           onImport={() => fileRef.current?.click()}
+        />
+      </MountWhen>
+      <MountWhen when={chartOpen}>
+        <ChordChartDialog
+          open={chartOpen}
+          onOpenChange={setChartOpen}
+          song={song}
         />
       </MountWhen>
       <MountWhen when={!!manualShare}>

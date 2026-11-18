@@ -69,6 +69,9 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   whenever the song isn't looping.
 - **Stems export** — one WAV per track (chords, melody, bass, drums) in a
   zip, all the same length and lined up from the start, for mixing in a DAW.
+- **Chord chart** — the chords of every section bar by bar, with the form,
+  key, tempo and how each section is played. Switch to Roman numerals or
+  another key, print it or save it as a PDF, or copy it as plain text.
 - **Count-in** — an optional bar of clicks before Play starts.
 - **Swing and humanize** — a shuffle feel and small, repeatable changes in
   timing and loudness, so playback and exports sound less mechanical.
@@ -110,7 +113,7 @@ npm run build    # type-check + production build into dist/
   song files and share links.
 - **Browser tests** (`e2e/*.e2e.ts`, Playwright) build the app and click
   through it in Chromium: adding chords, undo/redo, playback, My songs, share
-  links, MIDI/WAV/stems export, MIDI and song-file import, key changes,
+  links, MIDI/WAV/stems export, the chord chart, MIDI and song-file import, key changes,
   melody linking, opening offline, and the header and layout at phone,
   tablet and desktop widths.
   An accessibility suite runs axe on each screen in both themes and checks
@@ -143,6 +146,7 @@ Built with Vite, React 19, TypeScript, Tailwind CSS v4 and
 | `src/lib/render.ts`       | Offline WAV rendering and encoding, stems                                 |
 | `src/lib/tempo.ts`        | Tempo map: section tempos and slow-downs, beats to seconds                |
 | `src/lib/zip.ts`          | Minimal zip writer (for stems)                                            |
+| `src/lib/chart.ts`        | Chord chart: chords bar by bar, the form, plain-text copy                 |
 | `src/lib/pwa.ts`          | Service worker registration, updates, install prompt, online status       |
 | `sw/service-worker.js`    | The service worker; the build adds the file list (see `vite.config.ts`)   |
 | `public/`                 | Web app manifest and icons (`icon.svg` is the source of the PNGs)         |
