@@ -2,6 +2,7 @@ import type { ChordStyle, Section, Song } from "@/lib/arrange"
 import { DEFAULT_MIX } from "@/lib/audio-engine"
 import { DEFAULT_DRUMS, type DrumSettings, presetPattern } from "@/lib/drums"
 import { makeSection } from "@/lib/sections"
+import { type MeterId, barBeats, barSteps, meterOf } from "@/lib/meter"
 import type { TrackInstruments } from "@/lib/instruments"
 import {
   type Chord,
@@ -35,6 +36,8 @@ interface PartSpec {
 interface Spec {
   key: Key
   bpm: number
+  /** Time signature (4/4 when unset); chord lengths are in bars of it. */
+  meter?: MeterId
   degrees: number[]
   type?: ChordType | ChordType[]
   beats?: number
@@ -57,18 +60,19 @@ interface Spec {
   form?: number[]
 }
 
-function drumsOf(p: PartSpec): DrumSettings {
+function drumsOf(p: PartSpec, meter?: MeterId): DrumSettings {
   return p.drums
     ? {
         enabled: true,
-        pattern: presetPattern(p.drums),
+        pattern: presetPattern(p.drums, meter),
         fill: p.fill ?? false,
         crashAtStart: p.crash ?? false,
       }
     : { ...DEFAULT_DRUMS, enabled: false }
 }
 
-function makePart(p: PartSpec): Section {
+function makePart(p: PartSpec, meter?: MeterId): Section {
+  const m = meterOf(meter)
   const chords: Chord[] = p.degrees.map((degree, i) => ({
     id: uid(),
     degree,
@@ -76,22 +80,28 @@ function makePart(p: PartSpec): Section {
       ? p.type[i % p.type.length]
       : (p.type ?? "triad"),
     inversion: 0,
-    beats: p.beats ?? 4,
+    // `beats` are given as in 4/4 and scaled to the bar (a bar of 6/8 is 3).
+    beats: ((p.beats ?? 4) * barBeats(m)) / 4,
   }))
-  const melody = generateMelody(chords, { density: p.density, seed: p.seed })
-  return makeSection(p.name, chords, melody, drumsOf(p))
+  const melody = generateMelody(chords, {
+    density: p.density,
+    seed: p.seed,
+    barSteps: barSteps(m),
+  })
+  return makeSection(p.name, chords, melody, drumsOf(p, meter))
 }
 
 function make(spec: Spec): Song {
   const parts = [{ ...spec, name: spec.name ?? "Verse" }, ...(spec.more ?? [])]
   const sections = parts.map((p) =>
-    makePart({ ...p, type: p.type ?? spec.type })
+    makePart({ ...p, type: p.type ?? spec.type }, spec.meter)
   )
   const form = spec.form ?? sections.map((_, i) => i)
   return {
     title: "",
     key: spec.key,
     bpm: spec.bpm,
+    ...(spec.meter ? { meter: spec.meter } : {}),
     sections,
     arrangement: form.map((i) => ({ id: uid(), section: sections[i].id })),
     chordStyle: spec.style,
@@ -259,6 +269,40 @@ const RAW_EXAMPLES: Example[] = [
         reverb: 0.15,
       }),
   },
+  {
+    id: "folk",
+    label: "Folk Ballad in 6/8",
+    description: "D major · verse & chorus in 6/8 · 96 BPM",
+    build: () =>
+      make({
+        key: { root: 2, scale: "major" },
+        bpm: 96,
+        meter: "6/8",
+        degrees: [0, 5, 3, 4],
+        style: "arpeggio",
+        instruments: {
+          chords: "nylon_guitar",
+          melody: "flute",
+          bass: "acoustic_bass",
+          drums: "kit_cr8000",
+        },
+        drums: "pop",
+        density: 0.5,
+        seed: 6081,
+        reverb: 0.35,
+        more: [
+          {
+            name: "Chorus",
+            degrees: [3, 0, 3, 4],
+            drums: "rock",
+            fill: true,
+            density: 0.6,
+            seed: 6082,
+          },
+        ],
+        form: [0, 1, 0, 1],
+      }),
+  },
 ]
 
 /** Example songs, each titled with its label. */
@@ -271,7 +315,15 @@ export const EXAMPLES: Example[] = RAW_EXAMPLES.map((ex) => ({
 export function blankSong(previous: Song): Song {
   const section = makeSection(
     "Verse",
-    [{ id: uid(), degree: 0, type: "triad", inversion: 0, beats: 4 }],
+    [
+      {
+        id: uid(),
+        degree: 0,
+        type: "triad",
+        inversion: 0,
+        beats: barBeats(meterOf(previous.meter)),
+      },
+    ],
     [],
     structuredClone(previous.sections[0]?.drums ?? DEFAULT_DRUMS)
   )

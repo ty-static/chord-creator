@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import { type NoteEvent, type Song, buildEvents, layout } from "@/lib/arrange"
 import { EXAMPLES } from "@/lib/examples"
 import { buildMidi } from "@/lib/midi"
+import { meterOf, midiTimeSig } from "@/lib/meter"
 import {
   MidiParseError,
   guessKey,
@@ -225,6 +226,7 @@ describe("MIDI import round trip", () => {
         bpm: song.bpm,
         title: "x",
         keySig: keySignature(song.key),
+        timeSig: midiTimeSig(meterOf(song.meter)),
       })
       const midi = parseMidi(toBuffer(bytes))
       const roles = guessRoles(midi.parts)
@@ -256,6 +258,7 @@ describe("MIDI import round trip", () => {
       )
       expect(result.snapped).toBe(0)
       expect(result.drums !== null).toBe(flat.drums)
+      expect(result.meter).toBe(song.meter ?? "4/4")
     })
   }
 

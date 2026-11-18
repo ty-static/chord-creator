@@ -20,8 +20,6 @@ import {
 import { Switch } from "@/components/ui/switch"
 import {
   DRUM_PIECES,
-  DRUM_PRESETS,
-  DRUM_STEPS,
   DRUM_STEPS_PER_BEAT,
   type DrumPiece,
   type DrumSettings,
@@ -29,13 +27,16 @@ import {
   type FillStyle,
   type StepValue,
   emptyPattern,
+  drumPresets,
   matchingPreset,
   presetPattern,
 } from "@/lib/drums"
+import { type Meter, drumSteps, meterOf, pulses } from "@/lib/meter"
 import { cn } from "@/lib/utils"
 
 interface Props {
   drums: DrumSettings
+  meter?: Meter
   onChange: (drums: DrumSettings) => void
   /** Current playhead position in beats, or null when stopped. */
   playheadBeat: number | null
@@ -49,18 +50,23 @@ const NEXT: Record<StepValue, StepValue> = { 0: 1, 1: 2, 2: 0 }
 
 export function DrumEditor({
   drums,
+  meter = meterOf("4/4"),
   onChange,
   playheadBeat,
   onPreview,
   crashOnChange,
   onCrashOnChange,
 }: Props) {
-  const preset = matchingPreset(drums.pattern)
+  const preset = matchingPreset(drums.pattern, meter.id)
   const set = (p: Partial<DrumSettings>) => onChange({ ...drums, ...p })
+  const steps = drumSteps(meter)
   const playStep =
     playheadBeat === null
       ? -1
-      : Math.floor(playheadBeat * DRUM_STEPS_PER_BEAT) % DRUM_STEPS
+      : Math.floor(playheadBeat * DRUM_STEPS_PER_BEAT) % steps
+  // Felt beats, in steps: shaded by turns and numbered in the header.
+  const beatStarts = pulses(meter).map((p) => p * DRUM_STEPS_PER_BEAT)
+  const beatOf = (s: number) => beatStarts.filter((b) => b <= s).length - 1
 
   const toggle = (piece: DrumPiece, step: number, midi: number) => {
     const row = [...drums.pattern[piece]]
@@ -95,14 +101,14 @@ export function DrumEditor({
             value={preset ?? "custom"}
             onValueChange={(id) =>
               id !== "custom" &&
-              set({ enabled: true, pattern: presetPattern(id) })
+              set({ enabled: true, pattern: presetPattern(id, meter.id) })
             }
           >
             <SelectTrigger className="w-44" aria-label="Drum pattern">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {DRUM_PRESETS.map((p) => (
+              {drumPresets(meter).map((p) => (
                 <SelectItem key={p.id} value={p.id}>
                   {p.label}
                 </SelectItem>
@@ -113,7 +119,7 @@ export function DrumEditor({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => set({ pattern: emptyPattern() })}
+            onClick={() => set({ pattern: emptyPattern(meter.id) })}
           >
             <EraserIcon /> Clear
           </Button>
@@ -177,24 +183,21 @@ export function DrumEditor({
           <div
             className="grid min-w-[560px] gap-1"
             style={{
-              gridTemplateColumns: `88px repeat(${DRUM_STEPS}, minmax(24px, 1fr))`,
+              gridTemplateColumns: `88px repeat(${steps}, minmax(24px, 1fr))`,
             }}
             role="grid"
             aria-label="Drum steps"
           >
             <div />
-            {Array.from({ length: DRUM_STEPS }, (_, s) => (
+            {Array.from({ length: steps }, (_, s) => (
               <div
                 key={s}
                 className={cn(
                   "text-center font-mono text-[10px] text-muted-foreground",
-                  s % DRUM_STEPS_PER_BEAT === 0 &&
-                    "font-semibold text-foreground"
+                  beatStarts.includes(s) && "font-semibold text-foreground"
                 )}
               >
-                {s % DRUM_STEPS_PER_BEAT === 0
-                  ? s / DRUM_STEPS_PER_BEAT + 1
-                  : "·"}
+                {beatStarts.includes(s) ? beatOf(s) + 1 : "·"}
               </div>
             ))}
             {DRUM_PIECES.map((piece) => (
@@ -218,9 +221,7 @@ export function DrumEditor({
                     onClick={() => toggle(piece.id, s, piece.midi)}
                     className={cn(
                       "h-7 rounded-sm border transition-colors",
-                      Math.floor(s / DRUM_STEPS_PER_BEAT) % 2 === 0
-                        ? "bg-muted/40"
-                        : "bg-muted",
+                      beatOf(s) % 2 === 0 ? "bg-muted/40" : "bg-muted",
                       v === 1 && "border-primary/60 bg-primary/50",
                       v === 2 && "border-primary bg-primary",
                       s === playStep && "ring-2 ring-ring",

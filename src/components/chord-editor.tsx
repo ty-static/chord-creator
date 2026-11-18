@@ -68,9 +68,11 @@ import {
   uid,
   type Voicing,
 } from "@/lib/music"
+import { type Meter, barBeats, lengthLabel } from "@/lib/meter"
 
 interface Props {
   musicKey: Key
+  meter: Meter
   chords: Chord[]
   onChange: (chords: Chord[]) => void
   activeChordId: string | null
@@ -80,10 +82,15 @@ interface Props {
   voiceLeading: boolean
 }
 
-const BEAT_OPTIONS = [1, 2, 4, 8]
+/** "4 beats" in 4/4; "1 bar", "½ bar" and so on in other time signatures. */
+function lengthText(beats: number, meter: Meter) {
+  if (meter.id !== "4/4") return lengthLabel(beats, meter)
+  return `${beats} ${beats === 1 ? "beat" : "beats"}`
+}
 
 export function ChordEditor({
   musicKey,
+  meter,
   chords,
   onChange,
   activeChordId,
@@ -118,7 +125,12 @@ export function ChordEditor({
   }
 
   const addChord = (shape: ChordShape) => {
-    const chord: Chord = { id: uid(), ...shape, inversion: 0, beats: 4 }
+    const chord: Chord = {
+      id: uid(),
+      ...shape,
+      inversion: 0,
+      beats: barBeats(meter),
+    }
     onChange([...chords, chord])
     onPreview(chordMidi(chord, musicKey))
   }
@@ -137,7 +149,7 @@ export function ChordEditor({
             <Select
               onValueChange={(id) => {
                 const preset = PRESETS.find((p) => p.id === id)
-                if (preset) onChange(chordsFromPreset(preset))
+                if (preset) onChange(chordsFromPreset(preset, barBeats(meter)))
               }}
             >
               <SelectTrigger
@@ -157,7 +169,14 @@ export function ChordEditor({
             <Button
               variant="outline"
               onClick={() =>
-                onChange(randomProgression(4, Math.random() < 0.4))
+                onChange(
+                  randomProgression(
+                    4,
+                    Math.random() < 0.4,
+                    Date.now(),
+                    barBeats(meter)
+                  )
+                )
               }
             >
               <ShuffleIcon /> Randomize
@@ -296,7 +315,7 @@ export function ChordEditor({
                             {romanNumeral(chord, musicKey)}
                           </Badge>
                           <span className="hidden whitespace-nowrap sm:inline">
-                            {chord.beats} {chord.beats === 1 ? "beat" : "beats"}
+                            {lengthText(chord.beats, meter)}
                           </span>
                         </CardDescription>
                         <CardTitle className="text-2xl! font-semibold">
@@ -466,9 +485,9 @@ export function ChordEditor({
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                {BEAT_OPTIONS.map((b) => (
+                                {lengthOptions(meter, chord.beats).map((b) => (
                                   <SelectItem key={b} value={String(b)}>
-                                    {b} {b === 1 ? "beat" : "beats"}
+                                    {lengthText(b, meter)}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
@@ -615,4 +634,12 @@ function PaletteChip({
       </span>
     </Button>
   )
+}
+
+/** The lengths offered for a chord, with its own length if it's not one of them. */
+function lengthOptions(meter: Meter, current: number) {
+  const out = meter.chordLengths.includes(current)
+    ? meter.chordLengths
+    : [...meter.chordLengths, current]
+  return [...out].sort((a, b) => a - b)
 }

@@ -16,7 +16,6 @@ import { BASS_STYLES, type BassStyle } from "@/lib/bass"
 import {
   DEFAULT_DRUMS,
   DRUM_PIECES,
-  DRUM_STEPS,
   type DrumPattern,
   FILL_STYLES,
   type FillStyle,
@@ -43,6 +42,7 @@ import {
   uid,
 } from "@/lib/music"
 import { MAX_SECTIONS, MAX_SLOTS, makeSection } from "@/lib/sections"
+import { type MeterId, drumSteps, isMeterId, meterOf } from "@/lib/meter"
 
 export const DEFAULT_TITLE = "Untitled song"
 export const MAX_TITLE = 60
@@ -107,7 +107,8 @@ function chord(x: unknown): Chord | null {
       ? (x.type as ChordType)
       : "triad",
     inversion: int(x.inversion, 0, 0, 3),
-    beats: int(x.beats, 4, 1, 32),
+    // Whole or half beats (a dotted quarter in 6/8 is 1.5 beats).
+    beats: Math.round(num(x.beats, 4, 1, 32) * 2) / 2,
     ...(x.secondary === true
       ? { secondary: true }
       : (x.mode as string) in SCALES
@@ -128,25 +129,26 @@ function note(x: unknown): MelodyNote | null {
   }
 }
 
-function pattern(x: unknown): DrumPattern {
-  const out = emptyPattern()
+function pattern(x: unknown, meter: MeterId): DrumPattern {
+  const out = emptyPattern(meter)
   if (!isObj(x)) return out
   for (const { id: piece } of DRUM_PIECES) {
     const row = x[piece]
     if (!Array.isArray(row)) continue
     out[piece] = Array.from(
-      { length: DRUM_STEPS },
+      { length: drumSteps(meterOf(meter)) },
       (_, i) => int(row[i], 0, 0, 2) as StepValue
     )
   }
   return out
 }
 
-function drums(x: unknown): DrumSettings {
-  if (!isObj(x)) return { ...DEFAULT_DRUMS }
+function drums(x: unknown, meter: MeterId): DrumSettings {
+  const fallback = presetPattern("pop", meter)
+  if (!isObj(x)) return { ...DEFAULT_DRUMS, pattern: fallback }
   return {
     enabled: bool(x.enabled, DEFAULT_DRUMS.enabled),
-    pattern: isObj(x.pattern) ? pattern(x.pattern) : DEFAULT_DRUMS.pattern,
+    pattern: isObj(x.pattern) ? pattern(x.pattern, meter) : fallback,
     fill: bool(x.fill, DEFAULT_DRUMS.fill),
     crashAtStart: bool(x.crashAtStart, DEFAULT_DRUMS.crashAtStart),
     ...(FILL_STYLES.some((f) => f.value === x.fillStyle && f.value !== "snare")
@@ -155,7 +157,11 @@ function drums(x: unknown): DrumSettings {
   }
 }
 
-function section(x: unknown, index: number): Section | null {
+function section(
+  x: unknown,
+  index: number,
+  meter: MeterId = "4/4"
+): Section | null {
   if (!isObj(x)) return null
   const chords = (Array.isArray(x.chords) ? x.chords : [])
     .slice(0, MAX_CHORDS)
@@ -184,7 +190,7 @@ function section(x: unknown, index: number): Section | null {
     name: str(x.name, `Section ${index + 1}`, 24),
     chords,
     melody: clean,
-    drums: drums(x.drums),
+    drums: drums(x.drums, meter),
     // Only kept when they differ from the song, so files stay small.
     ...(tacet.length ? { tacet } : {}),
     ...(STYLES.includes(x.chordStyle as ChordStyle)
@@ -239,11 +245,12 @@ function instruments(x: unknown): TrackInstruments {
 export function normalizeSong(raw: unknown): Song {
   if (!isObj(raw)) throw new SongFileError("This isn't a Chord Creator song.")
 
+  const meter: MeterId = isMeterId(raw.meter) ? raw.meter : "4/4"
   let sections: Section[]
   if (Array.isArray(raw.sections)) {
     sections = raw.sections
       .slice(0, MAX_SECTIONS)
-      .map(section)
+      .map((x, i) => section(x, i, meter))
       .filter((s): s is Section => !!s)
   } else if (Array.isArray(raw.chords)) {
     // Saved before sections existed: one loop at the top level.
@@ -286,6 +293,7 @@ export function normalizeSong(raw: unknown): Song {
       scale: (key.scale as string) in SCALES ? (key.scale as ScaleId) : "major",
     },
     bpm: int(raw.bpm, 100, MIN_BPM, MAX_BPM),
+    ...(meter !== "4/4" ? { meter } : {}),
     sections,
     arrangement,
     chordStyle: STYLES.includes(raw.chordStyle as ChordStyle)

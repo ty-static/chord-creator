@@ -611,13 +611,14 @@ export function uid() {
   return Math.random().toString(36).slice(2, 10)
 }
 
-export function chordsFromPreset(preset: Preset): Chord[] {
+/** A preset's chords; `bar` is the length of a bar in beats (4 in 4/4). */
+export function chordsFromPreset(preset: Preset, bar = 4): Chord[] {
   return preset.degrees.map((degree) => ({
     id: uid(),
     degree,
     type: preset.type ?? "triad",
     inversion: 0,
-    beats: preset.beats ?? 4,
+    beats: ((preset.beats ?? 4) * bar) / 4,
   }))
 }
 
@@ -661,7 +662,8 @@ const TRANSITIONS: Record<number, number[]> = {
 export function randomProgression(
   length = 4,
   withSevenths = false,
-  seed = Date.now()
+  seed = Date.now(),
+  beats = 4
 ): Chord[] {
   const rand = mulberry32(seed)
   const degrees = [rand() < 0.75 ? 0 : 5]
@@ -676,7 +678,7 @@ export function randomProgression(
     degree,
     type: withSevenths && rand() < 0.5 ? "seventh" : "triad",
     inversion: 0,
-    beats: 4,
+    beats,
   }))
 }
 
@@ -714,6 +716,41 @@ export interface MelodyOptions {
   seed: number
   /** The key's scale, so chords outside it get the right chord tones. */
   scale?: ScaleId
+  /** Melody steps in a bar (8 in 4/4); bar starts get a note. */
+  barSteps?: number
+}
+
+/**
+ * A melody note near `prev`: mostly steps and small leaps, chord tones on
+ * strong beats, away from the edges of the range.
+ */
+export function pickDegree(
+  rand: () => number,
+  prev: number,
+  tones: number[],
+  strong: boolean
+) {
+  const candidates: { item: number; w: number }[] = []
+  for (let d = 0; d < MELODY_RANGE; d++) {
+    const dist = Math.abs(d - prev)
+    if (dist > 5) continue
+    const isTone = tones.includes(d % 7)
+    let w = [1.2, 4, 3, 1.5, 0.8, 0.4][dist]
+    if (strong && isTone) w *= 3.5
+    if (strong && !isTone) w *= 0.25
+    if (!strong && isTone) w *= 1.3
+    if (d <= 1 || d >= MELODY_RANGE - 2) w *= 0.5 // keep away from edges
+    candidates.push({ item: d, w })
+  }
+  return weightedPick(rand, candidates)
+}
+
+/** The tonic (degree 0, 7 or 14) closest to `prev`, for a final note. */
+export function nearestTonic(prev: number) {
+  return [0, 7, 14].reduce(
+    (best, t) => (Math.abs(t - prev) < Math.abs(best - prev) ? t : best),
+    7
+  )
 }
 
 export function generateMelody(
@@ -729,7 +766,7 @@ export function generateMelody(
     if (!at) break
     const onChord = at.offset === 0
     const onBeat = step % STEPS_PER_BEAT === 0
-    const onBar = step % (4 * STEPS_PER_BEAT) === 0
+    const onBar = step % (opts.barSteps ?? STEPS_PER_BAR) === 0
     const p =
       onChord || onBar
         ? 0.9
@@ -751,24 +788,9 @@ export function generateMelody(
     const tones = chordToneClasses(at.chord, opts.scale)
     const isLast = i === starts.length - 1
 
-    const candidates: { item: number; w: number }[] = []
-    for (let d = 0; d < MELODY_RANGE; d++) {
-      const dist = Math.abs(d - prev)
-      if (dist > 5) continue
-      const isTone = tones.includes(d % 7)
-      let w = [1.2, 4, 3, 1.5, 0.8, 0.4][dist]
-      if (strong && isTone) w *= 3.5
-      if (strong && !isTone) w *= 0.25
-      if (!strong && isTone) w *= 1.3
-      if (d <= 1 || d >= MELODY_RANGE - 2) w *= 0.5 // keep away from edges
-      candidates.push({ item: d, w })
-    }
-    let degree = weightedPick(rand, candidates)
+    let degree = pickDegree(rand, prev, tones, strong)
     if (isLast) {
-      degree = [0, 7, 14].reduce(
-        (best, t) => (Math.abs(t - prev) < Math.abs(best - prev) ? t : best),
-        7
-      )
+      degree = nearestTonic(prev)
       length = Math.max(length, Math.min(next - start, 4))
     }
     prev = degree
@@ -822,10 +844,10 @@ function replaceRange(
   return overlay(fresh, kept)
 }
 
-function barRange(chords: Chord[], bar: number) {
+function barRange(chords: Chord[], bar: number, barSteps = STEPS_PER_BAR) {
   const total = totalBeats(chords) * STEPS_PER_BEAT
-  const s0 = bar * STEPS_PER_BAR
-  return [s0, Math.min(s0 + STEPS_PER_BAR, total)] as const
+  const s0 = bar * barSteps
+  return [s0, Math.min(s0 + barSteps, total)] as const
 }
 
 /** Keep locked notes, generate everything else. */
@@ -847,7 +869,7 @@ export function regenerateBar(
   bar: number,
   opts: MelodyOptions
 ) {
-  const [s0, s1] = barRange(chords, bar)
+  const [s0, s1] = barRange(chords, bar, opts.barSteps)
   const fresh = generateMelody(chords, opts)
     .filter((n) => n.start >= s0 && n.start < s1)
     .map((n) => ({ ...n, length: Math.min(n.length, s1 - n.start) }))
@@ -855,8 +877,13 @@ export function regenerateBar(
 }
 
 /** Remove the unlocked notes that start in a bar. */
-export function clearBar(melody: MelodyNote[], chords: Chord[], bar: number) {
-  const [s0, s1] = barRange(chords, bar)
+export function clearBar(
+  melody: MelodyNote[],
+  chords: Chord[],
+  bar: number,
+  barSteps = STEPS_PER_BAR
+) {
+  const [s0, s1] = barRange(chords, bar, barSteps)
   return replaceRange(melody, s0, s1, [])
 }
 
@@ -865,9 +892,10 @@ export function lockBar(
   melody: MelodyNote[],
   chords: Chord[],
   bar: number,
-  locked: boolean
+  locked: boolean,
+  barSteps = STEPS_PER_BAR
 ) {
-  const [s0, s1] = barRange(chords, bar)
+  const [s0, s1] = barRange(chords, bar, barSteps)
   return melody.map((n) =>
     n.start >= s0 && n.start < s1 ? { ...n, locked } : n
   )
@@ -883,9 +911,10 @@ export function repeatBar(
   chords: Chord[],
   from: number,
   targets: number[],
-  followChords: boolean
+  followChords: boolean,
+  barSteps = STEPS_PER_BAR
 ) {
-  const [a0, a1] = barRange(chords, from)
+  const [a0, a1] = barRange(chords, from, barSteps)
   const motif = melody
     .filter((n) => n.start >= a0 && n.start < a1)
     .map((n) => ({ ...n, length: Math.min(n.length, a1 - n.start) }))
@@ -893,7 +922,7 @@ export function repeatBar(
   let out = melody
   for (const bar of targets) {
     if (bar === from) continue
-    const [s0, s1] = barRange(chords, bar)
+    const [s0, s1] = barRange(chords, bar, barSteps)
     if (s0 >= s1) continue
     let shift = 0
     const dstChord = chordAtStep(chords, s0)?.chord

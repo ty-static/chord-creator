@@ -71,6 +71,8 @@ export interface MidiOptions {
   markers?: { beat: number; text: string }[]
   /** Later key signatures (key changes), each from its beat on. */
   keyChanges?: { beat: number; sf: number; minor: boolean }[]
+  /** Time signature as [numerator, log2 denominator, clocks, 32nds] (4/4 when unset). */
+  timeSig?: number[]
 }
 
 const keySigEvent = (
@@ -102,7 +104,11 @@ export function buildMidi(events: NoteEvent[], opts: MidiOptions): Uint8Array {
           mpq & 0xff,
         ],
       },
-      { tick: 0, order: 1, bytes: [0xff, 0x58, 0x04, 4, 2, 24, 8] },
+      {
+        tick: 0,
+        order: 1,
+        bytes: [0xff, 0x58, 0x04, ...(opts.timeSig ?? [4, 2, 24, 8])],
+      },
       ...(opts.markers ?? []).map((m) => {
         const t = text(m.text)
         return {

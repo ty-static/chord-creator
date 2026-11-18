@@ -3,6 +3,7 @@
 // it has open.
 
 import { layout, type Song } from "@/lib/arrange"
+import { barBeats, meterOf } from "@/lib/meter"
 import { keyLabel, uid } from "@/lib/music"
 import { normalizeSong } from "@/lib/song-file"
 
@@ -25,11 +26,12 @@ type Store = Pick<Storage, "getItem" | "setItem" | "removeItem">
 
 export function summarize(song: Song) {
   const beats = layout(song).reduce((n, p) => n + p.beats, 0)
-  const bars = Math.round(beats / 4)
+  const bars = Math.round(beats / barBeats(meterOf(song.meter)))
   const sections = song.sections.length
   return [
     keyLabel(song.key),
     `${song.bpm} BPM`,
+    ...(song.meter ? [song.meter] : []),
     `${bars} ${bars === 1 ? "bar" : "bars"}`,
     ...(sections > 1 ? [`${sections} sections`] : []),
   ].join(" · ")

@@ -1,4 +1,7 @@
 // Drum patterns: one bar of 16th-note steps, repeated across the song.
+// A bar of 4/4 has 16 steps; other time signatures have more or fewer.
+
+import { type Meter, type MeterId, drumSteps, meterOf } from "@/lib/meter"
 
 export type DrumPiece =
   "kick" | "snare" | "clap" | "hat" | "openhat" | "tom" | "crash"
@@ -21,7 +24,7 @@ export const MIDI_TO_PIECE: Record<number, DrumPiece> = Object.fromEntries(
   DRUM_PIECES.map((p) => [p.midi, p.id])
 ) as Record<number, DrumPiece>
 
-export const DRUM_STEPS = 16 // per bar
+export const DRUM_STEPS = 16 // per bar of 4/4
 export const DRUM_STEPS_PER_BEAT = 4
 
 /** 0 = off, 1 = hit, 2 = accented hit */
@@ -70,9 +73,12 @@ export interface DrumSettings {
 }
 
 /** Build a pattern from strings: "x" = accent, "o" = hit, anything else = rest. */
-function pat(rows: Partial<Record<DrumPiece, string>>): DrumPattern {
+function pat(
+  rows: Partial<Record<DrumPiece, string>>,
+  length = DRUM_STEPS
+): DrumPattern {
   const row = (s = "") =>
-    Array.from({ length: DRUM_STEPS }, (_, i) =>
+    Array.from({ length }, (_, i) =>
       s[i] === "x" ? 2 : s[i] === "o" ? 1 : 0
     ) as StepValue[]
   return {
@@ -177,13 +183,184 @@ export const DRUM_PRESETS: {
   },
 ]
 
-export function presetPattern(id: string): DrumPattern {
-  const p = DRUM_PRESETS.find((d) => d.id === id) ?? DRUM_PRESETS[0]
+/**
+ * Fit a pattern to a bar of `length` steps: the start of the bar is kept and
+ * the last beat lines up with the old last beat, so a 4/4 groove in 3/4
+ * keeps its downbeat and its backbeat into the next bar.
+ */
+export function fitPattern(pattern: DrumPattern, length: number): DrumPattern {
+  const from = pattern.kick.length
+  if (from === length) return structuredClone(pattern)
+  // Longer bars are built from a fitted 3/4 bar and the rest (5/4 = 3 + 2).
+  if (length > from)
+    return from > 12
+      ? concat(fitPattern(pattern, 12), fitPattern(pattern, length - 12))
+      : concat(structuredClone(pattern), fitPattern(pattern, length - from))
+  const tail = Math.min(4, length)
+  const out = {} as DrumPattern
+  for (const { id } of DRUM_PIECES) {
+    const row = pattern[id]
+    out[id] = Array.from({ length }, (_, i) =>
+      i < length - tail ? row[i] : row[from - (length - i)]
+    )
+  }
+  return out
+}
+
+function concat(a: DrumPattern, b: DrumPattern): DrumPattern {
+  const out = {} as DrumPattern
+  for (const { id } of DRUM_PIECES) out[id] = [...a[id], ...b[id]]
+  return out
+}
+
+// Grooves for the time signatures whose beats split into threes or that
+// don't divide evenly; the others use the 4/4 presets, fitted to the bar.
+const SIX_EIGHT: typeof DRUM_PRESETS = [
+  {
+    id: "pop",
+    label: "Ballad",
+    pattern: pat(
+      {
+        kick: "x-------o---",
+        snare: "------x-----",
+        hat: "x-o-o-x-o-o-",
+      },
+      12
+    ),
+  },
+  {
+    id: "rock",
+    label: "Rock",
+    pattern: pat(
+      {
+        kick: "x---o---o-o-",
+        snare: "------x-----",
+        hat: "x-o-o-x-o-o-",
+      },
+      12
+    ),
+  },
+  {
+    id: "four",
+    label: "Kick on every beat",
+    pattern: pat(
+      {
+        kick: "x-----x-----",
+        clap: "------x-----",
+        openhat: "--o-o---o-o-",
+      },
+      12
+    ),
+  },
+  {
+    id: "halftime",
+    label: "Half-time",
+    pattern: pat(
+      {
+        kick: "x-----------",
+        snare: "------x-----",
+        hat: "o---o-o---o-",
+        tom: "--------o-o-",
+      },
+      12
+    ),
+  },
+  {
+    id: "jig",
+    label: "Folk",
+    pattern: pat(
+      {
+        kick: "x-----x-----",
+        snare: "----o-----o-",
+        hat: "--o-----o---",
+      },
+      12
+    ),
+  },
+]
+
+const SEVEN_EIGHT: typeof DRUM_PRESETS = [
+  {
+    id: "pop",
+    label: "Pop (2 + 2 + 3)",
+    pattern: pat(
+      {
+        kick: "x-------x-----",
+        snare: "----x-------o-",
+        hat: "x-o-x-o-x-o-o-",
+      },
+      14
+    ),
+  },
+  {
+    id: "rock",
+    label: "Rock (2 + 2 + 3)",
+    pattern: pat(
+      {
+        kick: "x---o---x-x---",
+        snare: "----x-------x-",
+        hat: "x-o-x-o-x-o-o-",
+      },
+      14
+    ),
+  },
+  {
+    id: "four",
+    label: "Kick on every beat",
+    pattern: pat(
+      {
+        kick: "x---x---x-----",
+        clap: "----x-------x-",
+        openhat: "--o---o---o---",
+      },
+      14
+    ),
+  },
+]
+
+/** 12/8 is two bars of 6/8 played as one. */
+const TWELVE_EIGHT = SIX_EIGHT.map((p) => ({
+  ...p,
+  pattern: concat(p.pattern, p.pattern),
+}))
+
+/** The preset grooves for a time signature. */
+export function drumPresets(meter: MeterId | Meter = "4/4") {
+  const m = typeof meter === "string" ? meterOf(meter) : meter
+  switch (m.id) {
+    case "4/4":
+      return DRUM_PRESETS
+    case "6/8":
+      return SIX_EIGHT
+    case "12/8":
+      return TWELVE_EIGHT
+    case "7/8":
+      return SEVEN_EIGHT
+    default:
+      return DRUM_PRESETS.map((p) => ({
+        ...p,
+        pattern: fitPattern(p.pattern, drumSteps(m)),
+      }))
+  }
+}
+
+export function presetPattern(id: string, meter?: MeterId): DrumPattern {
+  const list = drumPresets(meter)
+  const p = list.find((d) => d.id === id) ?? list[0]
   return structuredClone(p.pattern)
 }
 
-export function emptyPattern(): DrumPattern {
-  return pat({})
+export function emptyPattern(meter?: MeterId): DrumPattern {
+  return pat({}, drumSteps(meterOf(meter)))
+}
+
+/** A pattern moved to another time signature: the same preset if it has
+ *  one there, otherwise the pattern fitted to the new bar. */
+export function patternFor(pattern: DrumPattern, from: MeterId, to: MeterId) {
+  const preset = matchingPreset(pattern, from)
+  if (preset && drumPresets(to).some((p) => p.id === preset))
+    return presetPattern(preset, to)
+  return fitPattern(pattern, drumSteps(meterOf(to)))
 }
 
 export const DEFAULT_DRUMS: DrumSettings = {
@@ -194,9 +371,12 @@ export const DEFAULT_DRUMS: DrumSettings = {
 }
 
 /** Which preset (if any) the pattern currently matches. */
-export function matchingPreset(pattern: DrumPattern) {
+export function matchingPreset(pattern: DrumPattern, meter?: MeterId) {
   const key = JSON.stringify(pattern)
-  return DRUM_PRESETS.find((p) => JSON.stringify(p.pattern) === key)?.id ?? null
+  return (
+    drumPresets(meter).find((p) => JSON.stringify(p.pattern) === key)?.id ??
+    null
+  )
 }
 
 export interface DrumHit {
@@ -232,8 +412,9 @@ export function drumHits(
     DRUM_PIECES.map((p) => [p.id, p.midi])
   ) as Record<DrumPiece, number>
 
+  const bar = settings.pattern.kick.length || DRUM_STEPS
   for (let step = 0; step < totalSteps; step++) {
-    const s = step % DRUM_STEPS
+    const s = step % bar
     const start = step / DRUM_STEPS_PER_BEAT
     if (step >= fillFrom) {
       fillHits(fillStyle, step - fillFrom, fillLength, start, midiOf, hits)

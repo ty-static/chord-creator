@@ -9,6 +9,10 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
 
 - **Key & tempo** — 12 roots × 9 scales (major, minor and the modes); chords
   and melody are stored as scale degrees, so changing key moves everything.
+- **Time signatures** — 4/4, 3/4, 2/4, 5/4, 6/8, 7/8 and 12/8. Chord
+  lengths, the melody grid, drum grooves, the bass and the chord rhythm
+  follow the bar (dotted-quarter beats in 6/8); switching fits the song to
+  the new bar, and MIDI files keep the time signature both ways.
 - **Song sections** — verse, chorus, bridge and more, each with its own
   chords, melody and drum beat. Order and repeat them as a form (`A A B A`):
   drag, type the letters, loop one part, or split off a variation.
@@ -20,8 +24,11 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   recognises them too.
 - **Melody** — piano-roll editor (draw, drag, resize, keyboard nudging),
   generator with density control, per-bar regenerate / repeat motif
-  (exact or following the chords), and note locking.
-- **Drums** — 16-step pattern with accents, 9 preset grooves, fill and crash
+  (exact or following the chords), and note locking. Melodies can tie
+  sections together: reuse another section's tune (same notes, moved to fit
+  the chords, or its rhythm with new notes), and lead the end of a section
+  into the first note of the next one.
+- **Drums** — a one-bar step pattern with accents, preset grooves, fill and crash
   options, five sampled drum machines.
 - **Sound** — sampled piano, pads, strings, bass and more (via
   [smplr](https://github.com/danigb/smplr)), per-track volume / mute / solo,
@@ -63,8 +70,25 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
 npm install
 npm run dev      # http://localhost:5173
 npm run lint
+npm test         # unit tests (Vitest)
+npm run e2e      # browser tests (Playwright)
 npm run build    # type-check + production build into dist/
 ```
+
+### Testing
+
+- **Unit tests** (`src/**/*.test.ts`, Vitest) cover the music logic: keys and
+  chords, melody tools, bass and drums, arranging, MIDI and WAV encoding,
+  song files and share links.
+- **Browser tests** (`e2e/*.e2e.ts`, Playwright) build the app and click
+  through it in Chromium: adding chords, undo/redo, playback, My songs, share
+  links, MIDI/WAV export, MIDI and song-file import, key changes, melody
+  linking, and the header and layout at phone, tablet and desktop widths.
+  They block the network, so instruments use the built-in synth, and fail on
+  any error in the page. Run `npx playwright install chromium` once first;
+  `npm run e2e:ui` opens Playwright's UI.
+
+Both run in CI on every push and pull request.
 
 Built with Vite, React 19, TypeScript, Tailwind CSS v4 and
 [shadcn/ui](https://ui.shadcn.com).
@@ -78,6 +102,8 @@ Built with Vite, React 19, TypeScript, Tailwind CSS v4 and
 | `src/lib/sections.ts`     | Section and form editing, form letters, saved-song migration              |
 | `src/lib/bass.ts`         | Bass line patterns                                                        |
 | `src/lib/feel.ts`         | Swing and humanize timing                                                 |
+| `src/lib/melody-links.ts` | Melody from another section, and lead-ins into the next section           |
+| `src/lib/meter.ts`        | Time signatures: bar lengths, felt beats, MIDI time-signature bytes       |
 | `src/lib/drums.ts`        | Drum pieces, presets and pattern expansion                                |
 | `src/lib/audio-engine.ts` | Web Audio engine: sampled instruments, buses, mixer, reverb               |
 | `src/lib/scheduler.ts`    | Look-ahead playback scheduling with looping and live edits (pure, tested) |

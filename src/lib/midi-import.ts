@@ -1,7 +1,6 @@
 // Reading Standard MIDI Files and turning them into a Chord Creator song.
 
 import {
-  DRUM_STEPS,
   DRUM_STEPS_PER_BEAT,
   type DrumPattern,
   type DrumPiece,
@@ -18,6 +17,14 @@ import {
   keyFromSignature,
   nearestDegree,
 } from "@/lib/harmony"
+import {
+  type MeterId,
+  barBeats,
+  drumSteps,
+  meterFromTimeSig,
+  meterOf,
+  pulses,
+} from "@/lib/meter"
 import {
   type Chord,
   type Key,
@@ -334,7 +341,7 @@ export function guessKey(
 // ---------------------------------------------------------------- Conversion
 
 export const MAX_IMPORT_BARS = 64
-const BEATS_PER_BAR = 4
+const BEATS_PER_BAR = 4 // for guessing the key; the song uses the file's bars
 
 export interface ImportResult {
   chords: Chord[]
@@ -342,6 +349,8 @@ export interface ImportResult {
   drums: DrumSettings | null
   bass: boolean
   bars: number
+  /** The file's time signature, or 4/4 if the app doesn't support it. */
+  meter: MeterId
   truncated: boolean
   /** Melody notes that weren't in the key and were moved onto it. */
   snapped: number
@@ -406,9 +415,14 @@ export function midiToSong(
   const bassNotes = of("bass")
   const drumNotes = of("drums")
 
-  const fullBars = Math.max(1, Math.ceil(midi.length / BEATS_PER_BAR - 0.01))
+  const meter = meterFromTimeSig(midi.timeSig) ?? "4/4"
+  const m = meterOf(meter)
+  const barLen = barBeats(m)
+  const fullBars = Math.max(1, Math.ceil(midi.length / barLen - 0.01))
   const bars = Math.min(fullBars, MAX_IMPORT_BARS)
-  const songBeats = bars * BEATS_PER_BAR
+  const songBeats = bars * barLen
+  // A bar can be split into two chords where a felt beat falls halfway.
+  const half = pulses(m).includes(barLen / 2) ? barLen / 2 : null
 
   // ---- Chords: one per bar, or two when the harmony clearly changes mid-bar.
   const harmony =
@@ -426,15 +440,15 @@ export function midiToSong(
       }
     prev = guess
     const last = chords[chords.length - 1]
-    // Merge a repeat of the same chord, up to 8 beats.
+    // Merge a repeat of the same chord, up to two bars.
     if (
       last &&
       last.degree === guess.degree &&
       last.type === guess.type &&
       last.inversion === guess.inversion &&
       last.beats === beats &&
-      last.beats + beats <= 8 &&
-      [1, 2, 4, 8].includes(last.beats + beats)
+      last.beats + beats <= barLen * 2 &&
+      m.chordLengths.includes(last.beats + beats)
     ) {
       last.beats += beats
       return
@@ -448,11 +462,15 @@ export function midiToSong(
     })
   }
   for (let bar = 0; bar < bars; bar++) {
-    const b0 = bar * BEATS_PER_BAR
-    const whole = windowWeights(harmony, bassNotes, b0, b0 + 4)
+    const b0 = bar * barLen
+    const whole = windowWeights(harmony, bassNotes, b0, b0 + barLen)
     const g = guessChord(whole.weights, key, whole.bassPc)
-    const h1w = windowWeights(harmony, bassNotes, b0, b0 + 2)
-    const h2w = windowWeights(harmony, bassNotes, b0 + 2, b0 + 4)
+    if (half === null) {
+      push(g, barLen)
+      continue
+    }
+    const h1w = windowWeights(harmony, bassNotes, b0, b0 + half)
+    const h2w = windowWeights(harmony, bassNotes, b0 + half, b0 + barLen)
     const h1 = guessChord(h1w.weights, key, h1w.bassPc)
     const h2 = guessChord(h2w.weights, key, h2w.bassPc)
     const split =
@@ -462,9 +480,9 @@ export function midiToSong(
       h1.degree !== h2.degree &&
       (h1.fit + h2.fit) / 2 > g.fit + 0.12
     if (split) {
-      push(h1, 2)
-      push(h2, 2)
-    } else push(g, 4)
+      push(h1, half)
+      push(h2, half)
+    } else push(g, barLen)
   }
 
   // ---- Melody: quantise to eighth notes, keep the top line, map to the scale.
@@ -504,11 +522,12 @@ export function midiToSong(
   // ---- Drums: the most common one-bar pattern.
   let drums: DrumSettings | null = null
   if (drumNotes.length) {
+    const steps = drumSteps(m)
     const counts: Record<DrumPiece, { hits: number; vel: number }[]> =
       Object.fromEntries(
         Object.keys(emptyPattern()).map((k) => [
           k,
-          Array.from({ length: DRUM_STEPS }, () => ({ hits: 0, vel: 0 })),
+          Array.from({ length: steps }, () => ({ hits: 0, vel: 0 })),
         ])
       ) as Record<DrumPiece, { hits: number; vel: number }[]>
     const barsWithDrums = new Set<number>()
@@ -517,15 +536,15 @@ export function midiToSong(
       const piece = GM_DRUMS[n.pitch]
       if (!piece || n.start >= songBeats) continue
       const step = Math.round(n.start * DRUM_STEPS_PER_BEAT)
-      const bar = Math.floor(step / DRUM_STEPS)
+      const bar = Math.floor(step / steps)
       if (piece === "crash" && step === 0) crashAtStart = true
       barsWithDrums.add(bar)
-      const c = counts[piece][step % DRUM_STEPS]
+      const c = counts[piece][step % steps]
       c.hits++
       c.vel += n.velocity
     }
     const need = Math.max(1, Math.ceil(barsWithDrums.size * 0.4))
-    const pattern = emptyPattern()
+    const pattern = emptyPattern(meter)
     for (const piece of Object.keys(pattern) as DrumPiece[]) {
       // Accents are hits clearly louder than this drum's usual velocity.
       const vels = drumNotes
@@ -558,6 +577,7 @@ export function midiToSong(
     drums,
     bass: bassNotes.length > 0,
     bars,
+    meter,
     truncated: fullBars > bars,
     snapped,
   }

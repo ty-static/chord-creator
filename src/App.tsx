@@ -26,7 +26,11 @@ import { ChordEditor } from "@/components/chord-editor"
 import { DrumEditor } from "@/components/drum-editor"
 import type { PendingImport } from "@/components/import-dialog"
 import { KeyboardInputBar, MidiKeyboardMenu } from "@/components/midi-keyboard"
-import { MelodyEditor } from "@/components/melody-editor"
+import {
+  type LeadTarget,
+  type MelodySource,
+  MelodyEditor,
+} from "@/components/melody-editor"
 import { SoundPanel } from "@/components/sound-panel"
 import {
   DropdownMenu,
@@ -88,7 +92,7 @@ import {
   placedAt,
 } from "@/lib/arrange"
 import { type Release, type TrackMix, engine } from "@/lib/audio-engine"
-import { chordFromPitches } from "@/lib/harmony"
+import { chordFromPitches, foldDegree, nearestDegree } from "@/lib/harmony"
 import { type MidiNoteEvent, midiInput } from "@/lib/midi-input"
 import { INSTRUMENTS } from "@/lib/instruments"
 import { buildMidi, downloadBytes } from "@/lib/midi"
@@ -103,6 +107,8 @@ import {
   voiceChords,
   keyLabel,
   sectionKey,
+  degreeToMidi,
+  melodyBase,
   keySignature,
   noteName,
   scaleNotes,
@@ -129,7 +135,20 @@ import {
   shareUrl,
   songFile,
 } from "@/lib/song-file"
-import { formString, sectionLetter, updateSection } from "@/lib/sections"
+import {
+  formString,
+  sectionLetter,
+  setMeter,
+  updateSection,
+} from "@/lib/sections"
+import {
+  METERS,
+  type MeterId,
+  barBeats,
+  barSteps,
+  meterOf,
+  midiTimeSig,
+} from "@/lib/meter"
 
 // Loaded the first time they're needed, to keep the first download small.
 const ImportDialog = React.lazy(() =>
@@ -241,6 +260,8 @@ export function App() {
   /** The key the selected section plays in (after any key change): the
    *  editors show and build notes in it. */
   const editKey = sectionKey(song.key, section.transpose)
+  const meter = meterOf(song.meter)
+  const bar = barBeats(meter)
 
   // Welcome tour: shown automatically on the first visit.
   const [tourOpen, setTourOpen] = React.useState(
@@ -311,7 +332,7 @@ export function App() {
       degree: guess.degree,
       type: guess.type,
       inversion: guess.inversion,
-      beats: 4,
+      beats: bar,
       ...(guess.mode ? { mode: guess.mode } : {}),
       ...(guess.secondary ? { secondary: true } : {}),
     }
@@ -444,6 +465,38 @@ export function App() {
       : null
   const activeChordId = localBeat !== null ? (playingChord?.id ?? null) : null
 
+  // Linking melodies across sections (Melody tab, Sections menu).
+  const sectionLabel = (s: Section) =>
+    `${sectionLetter(song.sections.indexOf(s))} · ${s.name}`
+  const melodySources: MelodySource[] = song.sections
+    .filter((s) => s.id !== section.id && s.melody.length && s.chords.length)
+    .map((s) => ({
+      id: s.id,
+      label: sectionLabel(s),
+      chords: s.chords,
+      melody: s.melody,
+    }))
+  const leadTargets: LeadTarget[] = []
+  placed.forEach((p, i) => {
+    if (p.section.id !== section.id) return
+    const next = placed.slice(i + 1).find((q) => q.beats > 0)
+    if (!next?.section.melody.length) return
+    if (leadTargets.some((t) => t.id === next.section.id)) return
+    const first = next.section.melody.reduce((a, b) =>
+      b.start < a.start ? b : a
+    )
+    const nextKey = sectionKey(song.key, next.section.transpose)
+    const pitch = degreeToMidi(first.degree, nextKey, melodyBase(nextKey))
+    leadTargets.push({
+      id: next.section.id,
+      label:
+        next.section.id === section.id
+          ? `${sectionLabel(next.section)} (again)`
+          : sectionLabel(next.section),
+      degree: foldDegree(nearestDegree(pitch, editKey)),
+    })
+  })
+
   const timelineParts: TimelinePart[] = placed.map((p) => {
     const index = song.sections.indexOf(p.section)
     const v = voicingsById.get(p.section.id)
@@ -483,6 +536,17 @@ export function App() {
       setLoop(true)
       playFrom(range.start, { loop: true, range })
     } // Clearing the range: the running player just carries on over the whole song.
+  }
+
+  /** Move the song to another time signature. A loop over bars is let go:
+   *  its beats no longer line up with them. */
+  const changeMeter = (id: MeterId) => {
+    history.set((s) => setMeter(s, id))
+    if (loopTarget && "start" in loopTarget) setLoopTarget(null)
+    toast.success(`Now in ${id}`, {
+      description:
+        "Chord lengths, melodies and drum beats were fitted to the new bar.",
+    })
   }
 
   /** Loop one part of the form (null: stop looping it). */
@@ -851,6 +915,7 @@ export function App() {
         title: song.title,
         keySig: keySignature(song.key),
         keyChanges: keyChanges(song.key, placed),
+        timeSig: midiTimeSig(meter),
         markers:
           song.arrangement.length > 1
             ? placed.map((p) => ({
@@ -1147,6 +1212,29 @@ export function App() {
                 ))}
               </div>
               <Separator />
+              <div className="flex items-center justify-between gap-3">
+                <Label htmlFor="meter">Time signature</Label>
+                <Select
+                  value={meter.id}
+                  onValueChange={(v) => changeMeter(v as MeterId)}
+                >
+                  <SelectTrigger id="meter" size="sm" className="w-24">
+                    <SelectValue>{meter.label}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent align="end">
+                    {METERS.map((m) => (
+                      <SelectItem key={m.id} value={m.id} textValue={m.label}>
+                        <span className="flex flex-col">
+                          <span className="font-medium">{m.label}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {m.hint}
+                          </span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="flex flex-col gap-2">
                 <Label className="flex justify-between">
                   Tempo{" "}
@@ -1284,7 +1372,8 @@ export function App() {
               <CardDescription>
                 {song.sections.length}{" "}
                 {song.sections.length === 1 ? "section" : "sections"} ·{" "}
-                {beats / 4} {beats === 4 ? "bar" : "bars"} · {formString(song)}
+                {+(beats / bar).toFixed(1)} {beats === bar ? "bar" : "bars"} ·{" "}
+                {formString(song)}
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -1368,6 +1457,7 @@ export function App() {
           />
           <Timeline
             musicKey={song.key}
+            beatsPerBar={bar}
             parts={timelineParts}
             playheadBeat={player.beat}
             loopRange={loopRange}
@@ -1434,6 +1524,7 @@ export function App() {
                 voicings={voicings}
                 voiceLeading={song.voiceLeading}
                 musicKey={editKey}
+                meter={meter}
                 chords={section.chords}
                 onChange={(chords) => {
                   // Trim melody notes that now fall past the end of the progression.
@@ -1455,10 +1546,13 @@ export function App() {
             <TabsContent value="melody" className="mt-2">
               <MelodyEditor
                 musicKey={editKey}
+                sources={melodySources}
+                leadTargets={leadTargets}
                 key={section.id}
                 chords={section.chords}
                 melody={section.melody}
                 onChange={(melody) => patchSection({ melody })}
+                barSteps={barSteps(meter)}
                 playheadBeat={localBeat}
                 onPreview={(m) =>
                   void player.preview([m], "melody", song.instruments.melody)
@@ -1468,6 +1562,7 @@ export function App() {
             <TabsContent value="drums" className="mt-2">
               <DrumEditor
                 drums={section.drums}
+                meter={meter}
                 onChange={(drums) => patchSection({ drums })}
                 crashOnChange={!!song.crashOnChange}
                 onCrashOnChange={(on) =>

@@ -3,6 +3,7 @@ import {
   ChevronDownIcon,
   CopyIcon,
   EraserIcon,
+  Link2Icon,
   LockIcon,
   LockOpenIcon,
   RefreshCwIcon,
@@ -28,6 +29,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { KeyboardInputBar } from "@/components/midi-keyboard"
@@ -36,13 +40,19 @@ import { Slider } from "@/components/ui/slider"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { foldDegree, nearestDegree } from "@/lib/harmony"
 import { type MidiNoteEvent, midiInput } from "@/lib/midi-input"
+import {
+  BORROW_MODES,
+  type BorrowMode,
+  borrowMelody,
+  leadInto,
+} from "@/lib/melody-links"
 import { cn } from "@/lib/utils"
 import {
   type Chord,
   type Key,
   MELODY_RANGE,
   type MelodyNote,
-  STEPS_PER_BAR,
+  STEPS_PER_BAR as STEPS_PER_BAR_44,
   STEPS_PER_BEAT,
   chordName,
   clearBar,
@@ -58,13 +68,35 @@ import {
   uid,
 } from "@/lib/music"
 
+/** Another section whose melody can be reused here. */
+export interface MelodySource {
+  id: string
+  label: string
+  chords: Chord[]
+  melody: MelodyNote[]
+}
+
+/** A section that follows this one in the form, and its first note. */
+export interface LeadTarget {
+  id: string
+  label: string
+  /** The next section's first melody note, as a degree in this section's key. */
+  degree: number
+}
+
 interface Props {
   musicKey: Key
+  /** Other sections with a melody, for "Melody from another section". */
+  sources?: MelodySource[]
+  /** Sections that come next in the form, for "Lead into". */
+  leadTargets?: LeadTarget[]
   chords: Chord[]
   melody: MelodyNote[]
   onChange: (melody: MelodyNote[]) => void
   playheadBeat: number | null
   onPreview: (midi: number) => void
+  /** Eighth notes in a bar of the song's time signature (8 in 4/4). */
+  barSteps?: number
 }
 
 const CELL_W = 28
@@ -85,6 +117,9 @@ interface Drag {
 /** Keys aimed at these elements are left alone (typing, sliders, menus…). */
 const KEY_EXEMPT =
   "input, textarea, select, [contenteditable=true], [role=slider], [role=combobox], [role=option], [role=tab], [role=radio], [role=menuitem]"
+
+/** A fresh seed for the melody generator (outside render, for the React lint). */
+const randomSeed = () => Math.floor(Math.random() * 1e9)
 
 const clamp = (v: number, lo: number, hi: number) =>
   Math.max(lo, Math.min(hi, v))
@@ -108,11 +143,14 @@ function place(others: MelodyNote[], note: MelodyNote) {
 
 export function MelodyEditor({
   musicKey,
+  sources = [],
+  leadTargets = [],
   chords,
   melody,
   onChange,
   playheadBeat,
   onPreview,
+  barSteps: STEPS_PER_BAR = STEPS_PER_BAR_44,
 }: Props) {
   const [density, setDensity] = React.useState(55)
   const [newLength, setNewLength] = React.useState("2")
@@ -154,11 +192,36 @@ export function MelodyEditor({
   const genOpts = () => ({
     density: density / 100,
     scale: musicKey.scale,
-    seed: Math.floor(Math.random() * 1e9),
+    seed: randomSeed(),
+    barSteps: STEPS_PER_BAR,
   })
   const generate = () =>
     onChange(generateAroundLocked(melody, chords, genOpts()))
   const lockedCount = melody.filter((n) => n.locked).length
+  const borrow = (src: MelodySource, mode: BorrowMode) => {
+    onChange(borrowMelody(src, { chords, melody }, mode, genOpts()))
+    toast.success(`Melody from ${src.label}`, {
+      description: BORROW_MODES.find((m) => m.id === mode)?.hint,
+    })
+  }
+  const leadIn = (t: LeadTarget) => {
+    const next = leadInto(melody, chords, t.degree)
+    if (!next) {
+      toast.error("Couldn't add a lead-in", {
+        description:
+          totalSteps < 7
+            ? "This section is too short."
+            : "A locked note is in the last beat and a half. Unlock it first.",
+      })
+      return
+    }
+    onChange(next)
+    toast.success(`Leads into ${t.label}`, {
+      description: "The last beat and a half now steps into its first note.",
+    })
+  }
+  const canLink =
+    chords.length > 0 && (sources.length > 0 || leadTargets.length > 0)
   const bars = Math.ceil(totalSteps / STEPS_PER_BAR)
   const barNotes = (bar: number) =>
     melody.filter(
@@ -469,6 +532,66 @@ export function MelodyEditor({
           motif.
         </CardDescription>
         <CardAction className="flex gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                disabled={!canLink}
+                title={
+                  canLink
+                    ? "Reuse another section's melody, or lead into the next section"
+                    : "Give another section a melody to link them"
+                }
+              >
+                <Link2Icon /> Sections
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-60">
+              {sources.length > 0 && (
+                <>
+                  <DropdownMenuLabel>
+                    Melody from another section
+                  </DropdownMenuLabel>
+                  {sources.map((src) => (
+                    <DropdownMenuSub key={src.id}>
+                      <DropdownMenuSubTrigger>
+                        {src.label}
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-64">
+                        {BORROW_MODES.map((m) => (
+                          <DropdownMenuItem
+                            key={m.id}
+                            onSelect={() => borrow(src, m.id)}
+                            className="flex-col items-start gap-0"
+                          >
+                            <span className="font-medium">{m.label}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {m.hint}
+                            </span>
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  ))}
+                </>
+              )}
+              {sources.length > 0 && leadTargets.length > 0 && (
+                <DropdownMenuSeparator />
+              )}
+              {leadTargets.length > 0 && (
+                <>
+                  <DropdownMenuLabel>
+                    Lead into the next section
+                  </DropdownMenuLabel>
+                  {leadTargets.map((t) => (
+                    <DropdownMenuItem key={t.id} onSelect={() => leadIn(t)}>
+                      Lead into {t.label}
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button
             variant="outline"
             onClick={() => onChange(melody.filter((n) => n.locked))}
@@ -680,7 +803,8 @@ export function MelodyEditor({
                                     chords,
                                     bar,
                                     [bar + 1],
-                                    true
+                                    true,
+                                    STEPS_PER_BAR
                                   ),
                                   `Copied bar ${bar + 1} to bar ${bar + 2}`
                                 )
@@ -692,7 +816,14 @@ export function MelodyEditor({
                               disabled={!inBar.length || bars < 2}
                               onSelect={() =>
                                 apply(
-                                  repeatBar(melody, chords, bar, allBars, true),
+                                  repeatBar(
+                                    melody,
+                                    chords,
+                                    bar,
+                                    allBars,
+                                    true,
+                                    STEPS_PER_BAR
+                                  ),
                                   `Repeated bar ${bar + 1} across the song, following the chords`
                                 )
                               }
@@ -709,7 +840,8 @@ export function MelodyEditor({
                                     chords,
                                     bar,
                                     allBars,
-                                    false
+                                    false,
+                                    STEPS_PER_BAR
                                   ),
                                   `Repeated bar ${bar + 1} across the song`
                                 )
@@ -722,7 +854,13 @@ export function MelodyEditor({
                               disabled={!inBar.length}
                               onSelect={() =>
                                 onChange(
-                                  lockBar(melody, chords, bar, !allLocked)
+                                  lockBar(
+                                    melody,
+                                    chords,
+                                    bar,
+                                    !allLocked,
+                                    STEPS_PER_BAR
+                                  )
                                 )
                               }
                             >
@@ -733,7 +871,9 @@ export function MelodyEditor({
                               variant="destructive"
                               disabled={!inBar.some((n) => !n.locked)}
                               onSelect={() =>
-                                onChange(clearBar(melody, chords, bar))
+                                onChange(
+                                  clearBar(melody, chords, bar, STEPS_PER_BAR)
+                                )
                               }
                             >
                               <EraserIcon /> Clear this bar

@@ -57,6 +57,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { Placed, Section, Song } from "@/lib/arrange"
+import { barBeats, meterOf } from "@/lib/meter"
 import { uid } from "@/lib/music"
 import {
   MAX_SECTIONS,
@@ -132,7 +133,15 @@ export function SongForm({
     addNew(
       makeSection(
         nextSectionName(song),
-        [{ id: uid(), degree: 0, type: "triad", inversion: 0, beats: 4 }],
+        [
+          {
+            id: uid(),
+            degree: 0,
+            type: "triad",
+            inversion: 0,
+            beats: barBeats(meterOf(song.meter)),
+          },
+        ],
         [],
         structuredClone(selected?.drums ?? song.sections[0].drums)
       )
@@ -179,7 +188,11 @@ export function SongForm({
                     letter={sectionLetter(index)}
                     colorIndex={index}
                     section={section}
-                    bars={(p?.beats ?? 0) / 4}
+                    bars={
+                      +(
+                        (p?.beats ?? 0) / barBeats(meterOf(song.meter))
+                      ).toFixed(1)
+                    }
                     selected={section.id === selectedId}
                     playing={slot.id === playingSlotId}
                     looping={slot.id === loopSlotId}

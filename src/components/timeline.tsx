@@ -44,9 +44,9 @@ interface Props {
   onSelectSection: (sectionId: string) => void
   onSeek: (beat: number) => void
   onLoopChange: (range: LoopRange | null) => void
+  /** Length of a bar in beats (4 in 4/4, 3 in 6/8). */
+  beatsPerBar?: number
 }
-
-const BEATS_PER_BAR = 4
 /** Bars never get narrower than this; long songs scroll sideways. */
 const MIN_BAR_PX = 44
 
@@ -60,6 +60,7 @@ export function Timeline({
   onSelectSection,
   onSeek,
   onLoopChange,
+  beatsPerBar: BEATS_PER_BAR = 4,
 }: Props) {
   const total = parts.reduce((n, p) => n + p.beats, 0)
   const bars = Math.ceil(total / BEATS_PER_BAR)

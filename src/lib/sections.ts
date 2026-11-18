@@ -2,8 +2,9 @@
 // Everything here is pure: each function returns a new song.
 
 import type { Section, Slot, Song } from "@/lib/arrange"
-import { DEFAULT_DRUMS, type DrumSettings } from "@/lib/drums"
-import { type Chord, type MelodyNote, uid } from "@/lib/music"
+import { DEFAULT_DRUMS, type DrumSettings, patternFor } from "@/lib/drums"
+import { type MeterId, barBeats, meterOf } from "@/lib/meter"
+import { type Chord, type MelodyNote, STEPS_PER_BEAT, uid } from "@/lib/music"
 
 /** At most this many sections (letters A–H) and slots in the form. */
 export const MAX_SECTIONS = 8
@@ -224,4 +225,50 @@ export function migrateSong(
   if (!arrangement.length)
     arrangement = [{ id: uid(), section: sections[0].id }]
   return { sections, arrangement }
+}
+
+/**
+ * Move a song to another time signature. Every length is stretched or
+ * squeezed by the change in bar length, so a chord that filled a bar still
+ * fills one (and a half-bar chord stays half a bar); melodies move with
+ * them, and each drum beat becomes the same groove in the new time (or the
+ * old pattern fitted to the new bar).
+ */
+export function setMeter(song: Song, meter: MeterId): Song {
+  const from = song.meter ?? "4/4"
+  if (from === meter) return song
+  const ratio = barBeats(meterOf(meter)) / barBeats(meterOf(from))
+  const sections = song.sections.map((s) => {
+    const chords = s.chords.map((c) => ({
+      ...c,
+      beats: Math.max(1, Math.round(c.beats * ratio * 2) / 2),
+    }))
+    const steps = chords.reduce((n, c) => n + c.beats, 0) * STEPS_PER_BEAT
+    const melody: MelodyNote[] = []
+    for (const n of [...s.melody].sort((a, b) => a.start - b.start)) {
+      const start = Math.round(n.start * ratio)
+      const prev = melody[melody.length - 1]
+      if (start >= steps || (prev && prev.start >= start)) continue
+      if (prev && prev.start + prev.length > start)
+        prev.length = start - prev.start
+      melody.push({
+        ...n,
+        start,
+        length: Math.max(
+          1,
+          Math.min(Math.round(n.length * ratio), steps - start)
+        ),
+      })
+    }
+    return {
+      ...s,
+      chords,
+      melody,
+      drums: { ...s.drums, pattern: patternFor(s.drums.pattern, from, meter) },
+    }
+  })
+  const out: Song = { ...song, sections }
+  if (meter === "4/4") delete out.meter
+  else out.meter = meter
+  return out
 }

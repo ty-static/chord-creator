@@ -12,6 +12,7 @@ import {
 import type { TrackInstruments } from "@/lib/instruments"
 import type { Mix } from "@/lib/audio-engine"
 import { type BassStyle, bassLine } from "@/lib/bass"
+import { type MeterId, barSteps, beatsIn, meterOf } from "@/lib/meter"
 import {
   DRUM_PIECES,
   DRUM_STEPS,
@@ -92,6 +93,8 @@ export interface Song {
   title: string
   key: Key
   bpm: number
+  /** Time signature (4/4 when unset). */
+  meter?: MeterId
   /** Every section, in letter order (A, B, C…). */
   sections: Section[]
   /** The form: which section plays when, e.g. A A B A. */
@@ -118,7 +121,7 @@ export interface Song {
 /** What one section needs to become notes. */
 export type Part = Pick<
   Song,
-  "key" | "chordStyle" | "bass" | "bassStyle" | "voiceLeading"
+  "key" | "chordStyle" | "bass" | "bassStyle" | "voiceLeading" | "meter"
 > &
   Pick<
     Section,
@@ -131,6 +134,7 @@ export const partOf = (song: Song, section: Section): Part => ({
   bass: song.bass,
   bassStyle: section.bassStyle ?? song.bassStyle,
   voiceLeading: song.voiceLeading,
+  meter: song.meter,
   chords: section.chords,
   melody: section.melody,
   drums: section.drums,
@@ -268,6 +272,7 @@ export function partEvents(
   const layers = { ...allLayers }
   for (const t of song.tacet ?? []) layers[t] = false
   const events: NoteEvent[] = []
+  const meter = meterOf(song.meter)
   let t = 0
 
   const voicings = voiceChords(song.chords, song.key, song.voiceLeading)
@@ -284,15 +289,20 @@ export function partEvents(
             track: "chords",
           })
       } else if (song.chordStyle === "pulse") {
-        for (let b = 0; b < chord.beats; b++)
+        // On every felt beat: quarters in 4/4, dotted quarters in 6/8.
+        const end = t + chord.beats
+        const hits = beatsIn(meter, t, end)
+        hits.forEach((at, i) => {
+          const gap = (hits[i + 1] ?? end) - at
           for (const midi of notes)
             events.push({
               midi,
-              start: t + b,
-              duration: 0.85,
-              velocity: b % 2 === 0 ? 80 : 66,
+              start: at,
+              duration: gap * 0.85,
+              velocity: i % 2 === 0 ? 80 : 66,
               track: "chords",
             })
+        })
       } else {
         const pattern = [...notes, ...notes.slice(1, -1).reverse()]
         const steps = chord.beats * 2
@@ -314,7 +324,8 @@ export function partEvents(
       song.chords,
       song.key,
       song.bassStyle ?? "root",
-      kickTimes(song.drums, t)
+      kickTimes(song.drums, t),
+      meter
     ))
       events.push({ ...n, track: "bass" })
   }
@@ -326,7 +337,7 @@ export function partEvents(
         midi: degreeToMidi(n.degree, song.key, base),
         start: n.start / STEPS_PER_BEAT,
         duration: (n.length / STEPS_PER_BEAT) * 0.95,
-        velocity: n.start % (STEPS_PER_BEAT * 4) === 0 ? 100 : 88,
+        velocity: n.start % barSteps(meter) === 0 ? 100 : 88,
         track: "melody",
       })
     }
@@ -366,8 +377,8 @@ export function kickTimes(drums: DrumSettings, beats: number) {
   if (!drums.enabled) return []
   const out: number[] = []
   const steps = Math.round(beats * DRUM_STEPS_PER_BEAT)
+  const bar = drums.pattern.kick.length || DRUM_STEPS
   for (let step = 0; step < steps; step++)
-    if (drums.pattern.kick[step % DRUM_STEPS])
-      out.push(step / DRUM_STEPS_PER_BEAT)
+    if (drums.pattern.kick[step % bar]) out.push(step / DRUM_STEPS_PER_BEAT)
   return out
 }

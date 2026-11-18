@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { Song } from "@/lib/arrange"
-import { DEFAULT_DRUMS } from "@/lib/drums"
+import { DEFAULT_DRUMS, presetPattern } from "@/lib/drums"
 import {
   MAX_IMPORT_BARS,
   type ParsedMidi,
@@ -102,11 +102,18 @@ function ImportForm({ pending, song, onCancel, onImport }: Props) {
       "Verse",
       result.chords,
       result.melody,
-      result.drums ?? { ...DEFAULT_DRUMS, enabled: false }
+      result.drums ?? {
+        ...DEFAULT_DRUMS,
+        enabled: false,
+        pattern: presetPattern("pop", result.meter),
+      }
     )
+    const rest = { ...song }
+    delete rest.meter
     onImport(
       {
-        ...song,
+        ...rest,
+        ...(result.meter !== "4/4" ? { meter: result.meter } : {}),
         key,
         bpm,
         sections: [section],
@@ -128,7 +135,8 @@ function ImportForm({ pending, song, onCancel, onImport }: Props) {
         <DialogDescription>
           <span className="font-medium text-foreground">{filename}</span> ·{" "}
           {midi.parts.length} {midi.parts.length === 1 ? "part" : "parts"} ·{" "}
-          {midi.bpm} BPM · {Math.ceil(midi.length / 4)} bars
+          {midi.bpm} BPM · {midi.timeSig[0]}/{midi.timeSig[1]} · {result.bars}{" "}
+          bars
         </DialogDescription>
       </DialogHeader>
 
