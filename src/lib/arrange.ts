@@ -62,6 +62,10 @@ export interface Section {
   transpose?: number
   /** Get louder over the last bars, into the next section. */
   buildUp?: boolean
+  /** Tempo as a percentage of the song's, e.g. 50 for half time. */
+  tempo?: number
+  /** Slow down over the last bars (a ritardando). */
+  slowDown?: boolean
 }
 
 /** Beats a build-up takes at most, and how much louder it ends. */
@@ -83,7 +87,9 @@ export const hasSectionStyle = (s: Section) =>
   !!s.bassStyle ||
   (s.energy ?? 1) !== 1 ||
   !!s.transpose ||
-  !!s.buildUp
+  !!s.buildUp ||
+  (s.tempo ?? 100) !== 100 ||
+  !!s.slowDown
 
 /** One place in the song's form. The same section can appear in many slots. */
 export interface Slot {

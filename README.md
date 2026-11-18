@@ -53,6 +53,9 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   key change (lift the last chorus up a step). A key change shows everywhere:
   chord names, palette and piano roll in the new key, a key badge on the
   timeline, and a key signature change in the MIDI export.
+- **Tempo changes** — a section can play at its own tempo (half time, a
+  little faster, double time…) and slow down over its last bars. Playback,
+  the playhead, WAV and MIDI export (as tempo events) all follow the changes.
 - **Bass patterns** — roots, root–fifth, octaves, a walking line that steps
   into the next chord, a syncopated groove, or following the kick drum. Set
   for the song and changed per section.
@@ -61,7 +64,7 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   swells into the next section.
 - **Intros, outros and endings** — add an intro made from the first
   section's opening bars or an outro from the last section's closing bars
-  (chords and beat, no melody, a little softer), and end the song with a
+  (chords and beat, no melody, a little softer, slowing down at the end), and end the song with a
   held final chord, a short stab or a fade-out. Endings play in exports and
   whenever the song isn't looping.
 - **Count-in** — an optional bar of clicks before Play starts.

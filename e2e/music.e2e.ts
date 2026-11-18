@@ -200,3 +200,30 @@ test("adds an intro and outro, an ending and a count-in", async ({ page }) => {
   )
   await expect(page.getByLabel("Count-in")).toBeChecked()
 })
+
+test("plays a section at its own tempo", async ({ page }) => {
+  await openApp(page)
+  await loadExample(page, "Pop Anthem")
+  await editSection(page, "Chorus")
+  await page.getByRole("button", { name: "Section style" }).click()
+  await page.getByLabel("Tempo for this section").click()
+  await page.getByRole("option", { name: /^Half time/ }).click()
+  await page.getByLabel("Slow down at the end").click()
+  await page.keyboard.press("Escape")
+  await expect(page.getByText(/half time · slows down/).first()).toBeVisible()
+  await expect(page.getByText("Some sections change it")).toBeVisible()
+
+  // Plays without errors, and is saved.
+  await page.getByRole("button", { name: "Play", exact: true }).click()
+  await expect(
+    page.getByRole("button", { name: "Stop", exact: true })
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Stop", exact: true }).click()
+  await page.reload()
+  await editSection(page, "Chorus")
+  await page.getByRole("button", { name: "Section style" }).click()
+  await expect(page.getByLabel("Tempo for this section")).toContainText(
+    "Half time"
+  )
+  await expect(page.getByLabel("Slow down at the end")).toBeChecked()
+})

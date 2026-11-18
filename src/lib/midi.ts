@@ -61,6 +61,8 @@ function metaName(name: string): Raw {
 
 export interface MidiOptions {
   bpm: number
+  /** Tempo changes, in beats (the first replaces `bpm`). */
+  tempo?: { beat: number; bpm: number }[]
   title: string
   keySig: { sf: number; minor: boolean }
   /** General MIDI program per track (defaults: piano / piano / finger bass). */
@@ -88,22 +90,27 @@ export function buildMidi(events: NoteEvent[], opts: MidiOptions): Uint8Array {
   const tracks: number[][] = []
 
   // Conductor track: tempo, time signature, key signature.
-  const mpq = Math.round(60_000_000 / opts.bpm)
+  const tempo = opts.tempo?.length
+    ? opts.tempo.map((t, i) => (i === 0 ? { ...t, beat: 0 } : t))
+    : [{ beat: 0, bpm: opts.bpm }]
   tracks.push(
     trackChunk([
       metaName(opts.title),
-      {
-        tick: 0,
-        order: 1,
-        bytes: [
-          0xff,
-          0x51,
-          0x03,
-          (mpq >> 16) & 0xff,
-          (mpq >> 8) & 0xff,
-          mpq & 0xff,
-        ],
-      },
+      ...tempo.map((t) => {
+        const mpq = Math.round(60_000_000 / t.bpm)
+        return {
+          tick: Math.round(t.beat * PPQ),
+          order: 1,
+          bytes: [
+            0xff,
+            0x51,
+            0x03,
+            (mpq >> 16) & 0xff,
+            (mpq >> 8) & 0xff,
+            mpq & 0xff,
+          ],
+        }
+      }),
       {
         tick: 0,
         order: 1,

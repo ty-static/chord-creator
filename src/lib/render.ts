@@ -4,6 +4,7 @@
 import type { NoteEvent, TrackName } from "@/lib/arrange"
 import { AudioEngine, type Mix, trackGains } from "@/lib/audio-engine"
 import type { TrackInstruments } from "@/lib/instruments"
+import { type TempoChange, secondsAt, steadyTempo } from "@/lib/tempo"
 
 export const SAMPLE_RATE = 44100
 /** Room after the last note for releases and the reverb to ring out (seconds). */
@@ -16,6 +17,8 @@ export const SILENCE = 2.5e-4
 export interface RenderOptions {
   events: NoteEvent[]
   bpm: number
+  /** Tempo changes, if the song has any (otherwise `bpm` throughout). */
+  tempo?: TempoChange[]
   /** End of the song in beats. */
   end: number
   instruments: TrackInstruments
@@ -40,9 +43,14 @@ export function audibleTracks(events: NoteEvent[], mix: Mix): TrackName[] {
 }
 
 /** Length of the render in seconds: the song (or the last note, if later) plus the tail. */
-export function renderSeconds(events: NoteEvent[], bpm: number, end: number) {
+export function renderSeconds(
+  events: NoteEvent[],
+  tempo: number | TempoChange[],
+  end: number
+) {
+  const map = typeof tempo === "number" ? steadyTempo(tempo) : tempo
   const lastBeat = Math.max(end, ...events.map((e) => e.start + e.duration))
-  return LEAD_IN + (lastBeat * 60) / bpm + TAIL
+  return LEAD_IN + secondsAt(map, lastBeat) + TAIL
 }
 
 /** Number of samples to keep: up to the last audible sample, plus a short fade room. */
@@ -97,7 +105,8 @@ export function encodeWav(channels: Float32Array[], sampleRate: number) {
 /** Render the song to stereo audio. */
 export async function renderSong(opts: RenderOptions): Promise<RenderResult> {
   const sampleRate = opts.sampleRate ?? SAMPLE_RATE
-  const seconds = renderSeconds(opts.events, opts.bpm, opts.end)
+  const tempo = opts.tempo?.length ? opts.tempo : steadyTempo(opts.bpm)
+  const seconds = renderSeconds(opts.events, tempo, opts.end)
   const ctx = new OfflineAudioContext(
     2,
     Math.ceil(seconds * sampleRate),
@@ -121,14 +130,14 @@ export async function renderSong(opts: RenderOptions): Promise<RenderResult> {
   )
   await engine.reverbReady()
 
-  const spb = 60 / opts.bpm
   for (const e of opts.events) {
     const voice = voices[e.track]
     if (!voice) continue
+    const time = secondsAt(tempo, e.start)
     voice.start({
       note: e.midi,
-      time: LEAD_IN + e.start * spb,
-      duration: e.duration * spb,
+      time: LEAD_IN + time,
+      duration: secondsAt(tempo, e.start + e.duration) - time,
       velocity: e.velocity,
     })
   }
@@ -151,7 +160,7 @@ export async function renderSong(opts: RenderOptions): Promise<RenderResult> {
   const channels = Array.from({ length: buffer.numberOfChannels }, (_, c) =>
     buffer.getChannelData(c)
   )
-  const songEnd = Math.ceil((LEAD_IN + opts.end * spb) * sampleRate)
+  const songEnd = Math.ceil((LEAD_IN + secondsAt(tempo, opts.end)) * sampleRate)
   const keep = trimmedLength(channels, songEnd) + Math.round(0.05 * sampleRate)
   return {
     channels: channels.map((ch) => ch.slice(0, Math.min(keep, ch.length))),

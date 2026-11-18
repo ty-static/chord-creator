@@ -4,11 +4,20 @@
 import type { NoteEvent, TrackName } from "@/lib/arrange"
 import type { Release, Voice } from "@/lib/audio-engine"
 import type { TrackInstruments } from "@/lib/instruments"
+import {
+  type TempoChange,
+  bpmAt,
+  nextChange,
+  secondsBetween,
+  steadyTempo,
+} from "@/lib/tempo"
 
 /** Everything the player needs to know about the music. Can change while playing. */
 export interface PlaySettings {
   events: NoteEvent[]
   bpm: number
+  /** Tempo changes, if the song has any (otherwise `bpm` throughout). */
+  tempo?: TempoChange[]
   /** End of the song in beats. */
   end: number
   loop: boolean
@@ -64,6 +73,13 @@ export interface CountIn {
 /** The click of a count-in: a closed hi-hat, louder on beat 1. */
 export const CLICK_NOTE = 42
 
+/** The settings' tempo map. */
+export const tempoOf = (s: PlaySettings) =>
+  s.tempo?.length ? s.tempo : steadyTempo(s.bpm)
+
+/** Seconds per beat at a beat. */
+const spbAt = (s: PlaySettings, beat: number) => 60 / bpmAt(tempoOf(s), beat)
+
 export const instrumentsKey = (i: TrackInstruments) => JSON.stringify(i)
 
 /** The section that plays: the loop range when looping, otherwise the whole song. */
@@ -89,7 +105,8 @@ export function createTransport(opts: {
     settings.loop && (opts.from < start || opts.from >= stop)
       ? start
       : opts.from
-  const spb = 60 / settings.bpm
+  // The count-in clicks at the tempo the music starts in.
+  const spb = spbAt(settings, begin)
   const clicksAt = opts.now + START_DELAY
   const t0 = clicksAt + (opts.countIn?.beats ?? 0) * spb
   const scheduled: Transport["scheduled"] = (opts.countIn?.clicks ?? []).map(
@@ -131,7 +148,7 @@ export function beatAt(tr: Transport, time: number) {
 /** Schedule one slice of notes at the cursor. Returns false once the song has ended. */
 export function scheduleChunk(tr: Transport) {
   const s = tr.settings
-  const spb = 60 / s.bpm
+  const tempo = tempoOf(s)
   const { start, stop } = bounds(s)
   if (tr.cursorBeat >= stop) {
     if (!s.loop || stop <= start) {
@@ -140,10 +157,14 @@ export function scheduleChunk(tr: Transport) {
     }
     tr.cursorBeat = start
     tr.carry = true
-    tr.anchors.push({ time: tr.cursorTime, beat: start, spb })
+    tr.anchors.push({ time: tr.cursorTime, beat: start, spb: spbAt(s, start) })
   }
   const from = tr.cursorBeat
-  const to = Math.min(stop, from + CHUNK)
+  // A slice never spans a tempo change, so its tempo is steady.
+  const to = Math.min(stop, from + CHUNK, nextChange(tempo, from))
+  const spb = spbAt(s, from)
+  if (tr.anchors.at(-1)!.spb !== spb)
+    tr.anchors.push({ time: tr.cursorTime, beat: from, spb })
   for (const e of s.events) {
     const end = e.start + e.duration
     const starts = e.start >= from && e.start < to
@@ -155,7 +176,7 @@ export function scheduleChunk(tr: Transport) {
       note: e.midi,
       time,
       // Clip at the loop/song end so nothing hangs over the jump.
-      duration: (Math.min(end, stop) - at) * spb,
+      duration: secondsBetween(tempo, at, Math.min(end, stop)),
       velocity: e.velocity,
     })
     tr.scheduled.push({ time, release })
@@ -202,7 +223,7 @@ export function replan(tr: Transport, now: number) {
     tr.carry = true
   }
   tr.anchors = tr.anchors.filter((a) => a.time < t)
-  tr.anchors.push({ time: t, beat: b, spb: 60 / tr.settings.bpm })
+  tr.anchors.push({ time: t, beat: b, spb: spbAt(tr.settings, b) })
   tr.cursorBeat = b
   tr.cursorTime = t
 }

@@ -96,6 +96,7 @@ import { chordFromPitches, foldDegree, nearestDegree } from "@/lib/harmony"
 import { type MidiNoteEvent, midiInput } from "@/lib/midi-input"
 import { INSTRUMENTS } from "@/lib/instruments"
 import { buildMidi, downloadBytes } from "@/lib/midi"
+import { hasTempoChanges, tempoMap } from "@/lib/tempo"
 import {
   ROOTS,
   SCALES,
@@ -267,6 +268,7 @@ export function App() {
   // Sections: the form laid out in time, and the section open in the editors.
   const placed = React.useMemo(() => layout(song), [song])
   const beats = placed.reduce((n, p) => n + p.beats, 0)
+  const tempo = React.useMemo(() => tempoMap(song), [song])
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
   const section =
     song.sections.find((s) => s.id === selectedId) ?? song.sections[0]
@@ -448,6 +450,7 @@ export function App() {
     return {
       events,
       bpm: song.bpm,
+      tempo: hasTempoChanges(tempo) ? tempo : undefined,
       // The ending plays after the form, unless the song loops round.
       end: (opts.loop ?? loop) ? beats : beats + endingBeats(song),
       loop: opts.loop ?? loop,
@@ -904,6 +907,7 @@ export function App() {
       const out = await renderSong({
         events,
         bpm: song.bpm,
+        tempo,
         end: beats + endingBeats(song),
         instruments: song.instruments,
         mix: song.mix,
@@ -939,6 +943,7 @@ export function App() {
     downloadBytes(
       buildMidi(events, {
         bpm: song.bpm,
+        tempo,
         title: song.title,
         keySig: keySignature(song.key),
         keyChanges: keyChanges(song.key, placed),
@@ -1289,6 +1294,11 @@ export function App() {
                     patch({ bpm: v }, { coalesce: "bpm" })
                   }
                 />
+                {hasTempoChanges(tempo) && (
+                  <p className="text-xs text-muted-foreground">
+                    Some sections change it (see Section style).
+                  </p>
+                )}
               </div>
               <div className="flex items-center justify-between gap-3">
                 <Label
@@ -1552,6 +1562,7 @@ export function App() {
                 musicKey={song.key}
                 songChordStyle={song.chordStyle}
                 songBassStyle={song.bassStyle ?? "root"}
+                songBpm={song.bpm}
                 bass={song.bass}
                 onChange={patchSection}
               />

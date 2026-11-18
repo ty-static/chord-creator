@@ -103,6 +103,8 @@ export function copySection(section: Section, name: string): Section {
     energy: section.energy,
     transpose: section.transpose,
     buildUp: section.buildUp,
+    tempo: section.tempo,
+    slowDown: section.slowDown,
   }
 }
 
@@ -322,7 +324,7 @@ export function addIntro(song: Song): { song: Song; section: Section } | null {
 
 /**
  * A new Outro at the end of the form: the closing bars of the last
- * section's chords, without the melody, getting softer.
+ * section's chords, without the melody, softer and slowing down at the end.
  */
 export function addOutro(song: Song): { song: Song; section: Section } | null {
   const last = sectionOf(song, song.arrangement.length - 1)
@@ -336,6 +338,8 @@ export function addOutro(song: Song): { song: Song; section: Section } | null {
     }),
     energy: 0.85,
     ...(last.transpose ? { transpose: last.transpose } : {}),
+    ...(last.tempo ? { tempo: last.tempo } : {}),
+    slowDown: true,
   }
   return { song: addSection(song, section), section }
 }

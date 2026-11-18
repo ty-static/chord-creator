@@ -34,6 +34,7 @@ import {
 import { BASS_STYLES, type BassStyle, bassLabel } from "@/lib/bass"
 import { CHORD_STYLES, chordStyleLabel } from "@/lib/rhythm"
 import { type Key, keyLabel, sectionKey } from "@/lib/music"
+import { SECTION_TEMPOS, sectionTempoLabel } from "@/lib/tempo"
 import type { SetOptions } from "@/lib/use-history"
 
 const TRACK_LABELS: Record<TrackName, string> = {
@@ -77,6 +78,9 @@ export function sectionStyleSummary(
         : semitones(section.transpose)
     )
   if (section.buildUp) out.push("build-up")
+  if (section.tempo && section.tempo !== 100)
+    out.push(sectionTempoLabel(section.tempo).toLowerCase())
+  if (section.slowDown) out.push("slows down")
   return out
 }
 
@@ -89,6 +93,8 @@ type Patch = Partial<
     | "energy"
     | "transpose"
     | "buildUp"
+    | "tempo"
+    | "slowDown"
     | "drums"
   >
 >
@@ -98,6 +104,7 @@ export function SectionSettings({
   musicKey,
   songChordStyle,
   songBassStyle,
+  songBpm,
   bass,
   onChange,
 }: {
@@ -105,6 +112,7 @@ export function SectionSettings({
   musicKey: Key
   songChordStyle: ChordStyle
   songBassStyle: BassStyle
+  songBpm: number
   /** Whether the song has a bass line at all. */
   bass: boolean
   onChange: (patch: Patch, opts?: SetOptions) => void
@@ -141,7 +149,7 @@ export function SectionSettings({
           variant="outline"
           size="sm"
           className="relative"
-          title="Which tracks play, chord rhythm, energy and key change for this section"
+          title="Which tracks play, chord rhythm, energy, tempo and key change for this section"
         >
           <SlidersHorizontalIcon /> Section style
           {changed && (
@@ -155,7 +163,9 @@ export function SectionSettings({
       <PopoverContent
         align="end"
         aria-label={`How ${section.name} plays`}
-        className="flex w-80 flex-col gap-4"
+        collisionPadding={8}
+        // Scrolls when the screen is too short for all of it.
+        className="flex max-h-(--radix-popover-content-available-height) w-80 flex-col gap-4 overflow-y-auto"
       >
         <div>
           <p className="font-heading font-semibold">How {section.name} plays</p>
@@ -297,6 +307,60 @@ export function SectionSettings({
         </div>
 
         <div className="flex flex-col gap-2">
+          <Label>Tempo</Label>
+          <Select
+            value={String(section.tempo ?? 100)}
+            onValueChange={(v) =>
+              onChange({ tempo: v === "100" ? undefined : Number(v) })
+            }
+          >
+            <SelectTrigger
+              aria-label="Tempo for this section"
+              className="w-full"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {[
+                ...SECTION_TEMPOS.filter((t) => t.value < 100),
+                { value: 100, label: "Song tempo" },
+                ...SECTION_TEMPOS.filter((t) => t.value > 100),
+                // A tempo from a file that isn't one of the choices.
+                ...(section.tempo &&
+                !SECTION_TEMPOS.some((t) => t.value === section.tempo)
+                  ? [{ value: section.tempo, label: `${section.tempo}%` }]
+                  : []),
+              ].map((t) => (
+                <SelectItem key={t.value} value={String(t.value)}>
+                  {t.label}
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · {Math.round((songBpm * t.value) / 10) / 10} BPM
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          <Label
+            htmlFor="slow-down"
+            className="flex flex-col items-start gap-0.5"
+          >
+            Slow down at the end
+            <span className="text-xs font-normal text-muted-foreground">
+              Eases off the tempo over the last bars, like a final ritardando
+            </span>
+          </Label>
+          <Switch
+            id="slow-down"
+            checked={!!section.slowDown}
+            onCheckedChange={(on) => onChange({ slowDown: on || undefined })}
+          />
+        </div>
+
+        <div className="flex flex-col gap-2">
           <Label>Key change</Label>
           <div className="flex items-center gap-2">
             <Button
@@ -348,6 +412,8 @@ export function SectionSettings({
                 energy: undefined,
                 transpose: undefined,
                 buildUp: undefined,
+                tempo: undefined,
+                slowDown: undefined,
               })
             }
           >

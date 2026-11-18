@@ -46,6 +46,7 @@ import {
 import { MAX_SECTIONS, MAX_SLOTS, makeSection } from "@/lib/sections"
 import { type MeterId, drumSteps, isMeterId, meterOf } from "@/lib/meter"
 import { isChordStyle } from "@/lib/rhythm"
+import { MAX_SECTION_TEMPO, MIN_SECTION_TEMPO } from "@/lib/tempo"
 
 export const DEFAULT_TITLE = "Untitled song"
 export const MAX_TITLE = 60
@@ -187,6 +188,7 @@ function section(
     : []
   const energy = num(x.energy, 1, MIN_ENERGY, MAX_ENERGY)
   const transpose = int(x.transpose, 0, -MAX_TRANSPOSE, MAX_TRANSPOSE)
+  const tempo = int(x.tempo, 100, MIN_SECTION_TEMPO, MAX_SECTION_TEMPO)
   return {
     id: id(x.id),
     name: str(x.name, `Section ${index + 1}`, 24),
@@ -204,6 +206,8 @@ function section(
     ...(energy !== 1 ? { energy: Math.round(energy * 100) / 100 } : {}),
     ...(transpose ? { transpose } : {}),
     ...(x.buildUp === true ? { buildUp: true } : {}),
+    ...(tempo !== 100 ? { tempo } : {}),
+    ...(x.slowDown === true ? { slowDown: true } : {}),
   }
 }
 
@@ -393,6 +397,8 @@ function compact(song: Song) {
       energy: s.energy,
       transpose: s.transpose,
       buildUp: s.buildUp,
+      tempo: s.tempo,
+      slowDown: s.slowDown,
       drums: s.drums,
       ...notesOf(s),
     })),
