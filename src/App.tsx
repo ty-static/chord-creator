@@ -15,7 +15,6 @@ import {
   Loader2Icon,
   MonitorDownIcon,
   MoonIcon,
-  MusicIcon,
   PlayIcon,
   Redo2Icon,
   RepeatIcon,
@@ -30,6 +29,7 @@ import { toast } from "sonner"
 import { ChordEditor } from "@/components/chord-editor"
 import { DrumEditor } from "@/components/drum-editor"
 import type { PendingImport } from "@/components/import-dialog"
+import { Logo } from "@/components/logo"
 import { KeyboardInputBar, MidiKeyboardMenu } from "@/components/midi-keyboard"
 import {
   type LeadTarget,
@@ -1155,9 +1155,7 @@ export function App() {
       </a>
       <header className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center gap-1 px-3 py-2.5 sm:gap-1.5 sm:px-4 sm:py-3 lg:gap-3">
-          <div className="hidden size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground lg:flex">
-            <MusicIcon className="size-5" />
-          </div>
+          <Logo className="hidden size-9 shrink-0 text-foreground lg:block" />
           <div className="mr-auto min-w-20">
             <h1 className="text-xs leading-tight text-muted-foreground max-sm:sr-only">
               Static Sound

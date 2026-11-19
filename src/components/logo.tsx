@@ -1,0 +1,35 @@
+import type { SVGProps } from "react"
+
+/**
+ * The Static Sound logo: a 4:3 TV with a music note on its screen, drawn in
+ * the text colour (black in light mode, white in dark mode).
+ */
+export function Logo(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 64 64"
+      fill="currentColor"
+      aria-hidden
+      focusable="false"
+      {...props}
+    >
+      <path
+        d="M22 3.5 32 13l10-9.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        fillRule="evenodd"
+        d="M11 13h42a7 7 0 0 1 7 7v28a7 7 0 0 1-7 7H11a7 7 0 0 1-7-7V20a7 7 0 0 1 7-7Zm2 7a3 3 0 0 0-3 3v22a3 3 0 0 0 3 3h38a3 3 0 0 0 3-3V23a3 3 0 0 0-3-3Z"
+      />
+      <path d="M14 55h7v3.5a1.5 1.5 0 0 1-1.5 1.5h-4a1.5 1.5 0 0 1-1.5-1.5Zm29 0h7v3.5a1.5 1.5 0 0 1-1.5 1.5h-4a1.5 1.5 0 0 1-1.5-1.5Z" />
+      <path
+        transform="translate(32 34) scale(.82) translate(-33.5 -36.5)"
+        d="M32 24.5h3.2c.4 3.3 2.6 4.6 4.6 6.2 2 1.6 3.4 3.7 2.4 7.4-.5-2.6-2.4-4.4-6.9-5.2v10.2c0 3-2.8 5.4-6.2 5.4-2.6 0-4.4-1.4-4.4-3.4 0-2.9 3.2-5 6.4-5 .3 0 .6 0 .9.1Z"
+      />
+    </svg>
+  )
+}
