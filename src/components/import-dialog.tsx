@@ -44,6 +44,8 @@ import { makeSection } from "@/lib/sections"
 export interface PendingImport {
   filename: string
   midi: ParsedMidi
+  /** Making an arrangement of a tune: add a drum beat if it has none. */
+  arrange?: boolean
 }
 
 interface Props {
@@ -97,6 +99,7 @@ function ImportForm({ pending, song, onCancel, onImport }: Props) {
       return next
     })
 
+  const addDrums = !!pending!.arrange && !result.drums
   const doImport = () => {
     const section = makeSection(
       "Verse",
@@ -104,7 +107,7 @@ function ImportForm({ pending, song, onCancel, onImport }: Props) {
       result.melody,
       result.drums ?? {
         ...DEFAULT_DRUMS,
-        enabled: false,
+        enabled: addDrums,
         pattern: presetPattern("pop", result.meter),
       }
     )
@@ -247,7 +250,8 @@ function ImportForm({ pending, song, onCancel, onImport }: Props) {
         <p className="text-xs text-muted-foreground" data-import-summary>
           {result.bars} bars · {result.chords.length} chords ·{" "}
           {hasMelody ? `${result.melody.length} melody notes` : "no melody"} ·{" "}
-          {result.drums ? "drum beat" : "no drums"} · {bpm} BPM
+          {result.drums ? "drum beat" : addDrums ? "pop drum beat" : "no drums"}{" "}
+          · {bpm} BPM
         </p>
         {(result.truncated ||
           result.snapped > 0 ||

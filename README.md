@@ -57,9 +57,15 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   and converts them into chords, melody and a drum pattern.
 - **Audio to MIDI** — its own page (the tab under the header): a recording of
   one melody (WAV, or MP3/OGG/FLAC) becomes MIDI notes, on the device. Pitch
-  by YIN, a tempo guess from the onsets, then play, download as `.mid` or open
-  as a song through the MIDI import. Dropping a recording anywhere opens it
-  there. (Brought over from SoundCheck.)
+  by YIN, a tempo guess from the onsets, then play or download as `.mid`.
+  Dropping a recording anywhere opens it there. (Brought over from SoundCheck.)
+- **Record an idea** — sing, hum or play into the microphone on the Audio to
+  MIDI page (with a timer and level meter, up to 5 minutes). The take is
+  saved as a WAV with the quiet start and end cut, and its notes are found
+  the same way.
+- **Make an arrangement** — turn the notes found into a new song: chords
+  worked out to fit the tune, a bass line and a pop drum beat, ready to edit
+  and export.
 - **MIDI keyboard** — Web MIDI input (Chrome/Edge): play through the current
   instrument, add chords by playing them, step-enter melody notes.
 - **Section style** — per section: which tracks play (no drums in the intro,
@@ -136,6 +142,7 @@ npm run build    # type-check + production build into dist/
 - **Browser tests** (`e2e/*.e2e.ts`, Playwright) build the app and click
   through it in Chromium: adding chords, undo/redo, playback, My songs, share
   links, MIDI/WAV/stems export, the chord chart, MIDI and song-file import, key changes,
+  Audio to MIDI (from a file and from a fake microphone),
   melody linking, opening offline, and the header and layout at phone,
   tablet and desktop widths.
   An accessibility suite runs axe on each screen in both themes and checks
@@ -151,35 +158,37 @@ Built with Vite, React 19, TypeScript, Tailwind CSS v4 and
 
 ### Layout
 
-| Path                      | What it does                                                              |
-| ------------------------- | ------------------------------------------------------------------------- |
-| `src/lib/music.ts`        | Keys, scales, chords, melody generator, bar tools, voice leading          |
-| `src/lib/arrange.ts`      | Song model; lays out the form and turns it into timed note events         |
-| `src/lib/sections.ts`     | Section and form editing, form letters, saved-song migration              |
-| `src/lib/bass.ts`         | Bass line patterns                                                        |
-| `src/lib/rhythm.ts`       | Chord rhythms: block, pulse, arpeggio, strums and other patterns          |
-| `src/lib/feel.ts`         | Swing and humanize timing                                                 |
-| `src/lib/melody-links.ts` | Melody from another section, and lead-ins into the next section           |
-| `src/lib/meter.ts`        | Time signatures: bar lengths, felt beats, MIDI time-signature bytes       |
-| `src/lib/drums.ts`        | Drum pieces, presets and pattern expansion                                |
-| `src/lib/audio-engine.ts` | Web Audio engine: sampled instruments, buses, mixer, reverb               |
-| `src/lib/scheduler.ts`    | Look-ahead playback scheduling with looping and live edits (pure, tested) |
-| `src/lib/use-player.ts`   | React hook that drives the scheduler with the real audio clock            |
-| `src/lib/render.ts`       | Offline WAV rendering and encoding, stems                                 |
-| `src/lib/tempo.ts`        | Tempo map: section tempos and slow-downs, beats to seconds                |
-| `src/lib/zip.ts`          | Minimal zip writer (for stems)                                            |
-| `src/lib/chart.ts`        | Chord chart: chords bar by bar, the form, plain-text copy                 |
-| `src/lib/suggest.ts`      | Next-chord suggestions: common moves, loops, cadences                     |
-| `src/lib/pwa.ts`          | Service worker registration, updates, install prompt, online status       |
-| `sw/service-worker.js`    | The service worker; the build adds the file list (see `vite.config.ts`)   |
-| `public/`                 | Web app manifest and icons (`icon.svg` is the source of the PNGs)         |
-| `src/lib/song-file.ts`    | Song validation, `.json` song files and backups, share-link encoding      |
-| `src/lib/library.ts`      | The song library in local storage (and moving the old single save in)     |
-| `src/lib/midi.ts`         | MIDI file writer                                                          |
-| `src/lib/midi-import.ts`  | MIDI file parser and song converter                                       |
-| `src/lib/harmony.ts`      | Chord / key recognition shared by import and keyboard input               |
-| `src/lib/midi-input.ts`   | Web MIDI keyboard input                                                   |
-| `src/components/`         | Editors, timeline, sound panel, dialogs and shadcn/ui components          |
+| Path                       | What it does                                                              |
+| -------------------------- | ------------------------------------------------------------------------- |
+| `src/lib/music.ts`         | Keys, scales, chords, melody generator, bar tools, voice leading          |
+| `src/lib/arrange.ts`       | Song model; lays out the form and turns it into timed note events         |
+| `src/lib/sections.ts`      | Section and form editing, form letters, saved-song migration              |
+| `src/lib/bass.ts`          | Bass line patterns                                                        |
+| `src/lib/rhythm.ts`        | Chord rhythms: block, pulse, arpeggio, strums and other patterns          |
+| `src/lib/feel.ts`          | Swing and humanize timing                                                 |
+| `src/lib/melody-links.ts`  | Melody from another section, and lead-ins into the next section           |
+| `src/lib/meter.ts`         | Time signatures: bar lengths, felt beats, MIDI time-signature bytes       |
+| `src/lib/drums.ts`         | Drum pieces, presets and pattern expansion                                |
+| `src/lib/audio-engine.ts`  | Web Audio engine: sampled instruments, buses, mixer, reverb               |
+| `src/lib/scheduler.ts`     | Look-ahead playback scheduling with looping and live edits (pure, tested) |
+| `src/lib/use-player.ts`    | React hook that drives the scheduler with the real audio clock            |
+| `src/lib/render.ts`        | Offline WAV rendering and encoding, stems                                 |
+| `src/lib/tempo.ts`         | Tempo map: section tempos and slow-downs, beats to seconds                |
+| `src/lib/zip.ts`           | Minimal zip writer (for stems)                                            |
+| `src/lib/chart.ts`         | Chord chart: chords bar by bar, the form, plain-text copy                 |
+| `src/lib/suggest.ts`       | Next-chord suggestions: common moves, loops, cadences                     |
+| `src/lib/pwa.ts`           | Service worker registration, updates, install prompt, online status       |
+| `sw/service-worker.js`     | The service worker; the build adds the file list (see `vite.config.ts`)   |
+| `public/`                  | Web app manifest and icons (`icon.svg` is the source of the PNGs)         |
+| `src/lib/song-file.ts`     | Song validation, `.json` song files and backups, share-link encoding      |
+| `src/lib/library.ts`       | The song library in local storage (and moving the old single save in)     |
+| `src/lib/midi.ts`          | MIDI file writer                                                          |
+| `src/lib/midi-import.ts`   | MIDI file parser and song converter                                       |
+| `src/lib/harmony.ts`       | Chord / key recognition shared by import and keyboard input               |
+| `src/lib/midi-input.ts`    | Web MIDI keyboard input                                                   |
+| `src/lib/audio-to-midi.ts` | Pitch detection, notes and tempo from a recording (Audio to MIDI)         |
+| `src/lib/recorder.ts`      | Microphone recording as raw samples, trimming, saving takes as WAV        |
+| `src/components/`          | Editors, timeline, sound panel, dialogs and shadcn/ui components          |
 
 ## Deployment
 

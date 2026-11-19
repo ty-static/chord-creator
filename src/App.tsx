@@ -1423,7 +1423,7 @@ export function App() {
                 dropped={droppedAudio}
                 onOpenAsSong={(midi, filename) => {
                   changePage("song")
-                  setPendingImport({ filename, midi })
+                  setPendingImport({ filename, midi, arrange: true })
                 }}
               />
             </React.Suspense>

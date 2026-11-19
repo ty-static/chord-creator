@@ -4,11 +4,13 @@ import {
   DownloadIcon,
   FileAudioIcon,
   Loader2Icon,
+  MicIcon,
   PlayIcon,
   SquareIcon,
   SquarePenIcon,
   TriangleAlertIcon,
   WandSparklesIcon,
+  XIcon,
 } from "lucide-react"
 
 import { TempoControl } from "@/components/tempo-control"
@@ -41,6 +43,13 @@ import type { TrackInstruments } from "@/lib/instruments"
 import { buildMidi, downloadBytes } from "@/lib/midi"
 import { type ParsedMidi, guessKey } from "@/lib/midi-import"
 import { keyLabel, keySignature, noteNameWithOctave } from "@/lib/music"
+import {
+  MicError,
+  type Recorder,
+  canRecord,
+  startRecording,
+  takeToFile,
+} from "@/lib/recorder"
 import type { PlaySettings } from "@/lib/use-player"
 import { cn } from "@/lib/utils"
 
@@ -80,6 +89,8 @@ type Status =
   | { state: "error"; message: string }
 
 const WAVE_WIDTH = 600
+/** The longest take from the microphone (seconds). */
+const MAX_RECORDING = 5 * 60
 const base = (name: string) => name.replace(/\.[^.]+$/, "") || "Recording"
 const fmt = (s: number) =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`
@@ -103,13 +114,91 @@ export function AudioToMidi({
   const [status, setStatus] = React.useState<Status>({ state: "idle" })
   const [over, setOver] = React.useState(false)
   const abort = React.useRef<AbortController | null>(null)
+  const recorder = React.useRef<Recorder | null>(null)
+  // Bumped by Cancel, so a microphone that answers late is let go.
+  const attempt = React.useRef(0)
+  // "starting" while the browser asks for the microphone.
+  const [recording, setRecording] = React.useState<
+    null | "starting" | { seconds: number; level: number; full: boolean }
+  >(null)
   const working = status.state === "working"
+  const busy = working || recording !== null
 
   // Forget the recording's object URL when it's replaced or the page goes.
   React.useEffect(() => {
     if (loaded) return () => URL.revokeObjectURL(loaded.url)
   }, [loaded])
-  React.useEffect(() => () => abort.current?.abort(), [])
+  React.useEffect(
+    () => () => {
+      abort.current?.abort()
+      recorder.current?.cancel()
+      attempt.current++
+    },
+    []
+  )
+
+  // While recording, show the time and level.
+  const live = recording !== null && recording !== "starting"
+  React.useEffect(() => {
+    if (!live) return
+    let id = 0
+    const tick = () => {
+      const r = recorder.current
+      if (r)
+        setRecording((s) =>
+          s && s !== "starting"
+            ? { ...s, seconds: r.seconds(), level: r.level() }
+            : s
+        )
+      id = requestAnimationFrame(tick)
+    }
+    id = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(id)
+  }, [live])
+
+  const record = async () => {
+    abort.current?.abort()
+    player.stop()
+    setStatus({ state: "idle" })
+    setRecording("starting")
+    const mine = ++attempt.current
+    try {
+      const r = await startRecording({
+        maxSeconds: MAX_RECORDING,
+        onLimit: () =>
+          setRecording((s) =>
+            s && s !== "starting" ? { ...s, full: true } : s
+          ),
+      })
+      if (mine !== attempt.current) return r.cancel()
+      recorder.current = r
+      setRecording({ seconds: 0, level: 0, full: false })
+    } catch (err) {
+      if (mine !== attempt.current) return
+      setRecording(null)
+      setStatus({
+        state: "error",
+        message:
+          err instanceof MicError ? err.message : "Couldn't start recording.",
+      })
+    }
+  }
+
+  const stopRecording = async (keep: boolean) => {
+    const r = recorder.current
+    recorder.current = null
+    attempt.current++
+    setRecording(null)
+    if (!r) return
+    if (!keep) return r.cancel()
+    const take = await r.stop()
+    if (take.samples.length < take.sampleRate * 0.25)
+      return setStatus({
+        state: "error",
+        message: "That take was too short. Record for a little longer.",
+      })
+    void open(takeToFile(take))
+  }
 
   const convert = async (rec: Loaded, sens = sensitivity) => {
     abort.current?.abort()
@@ -243,8 +332,8 @@ export function AudioToMidi({
           <CardTitle>Audio to MIDI</CardTitle>
           <CardDescription>
             Turn a recording of one melody (singing, humming or a single
-            instrument) into MIDI notes. It all happens on this device; nothing
-            is uploaded.
+            instrument) into MIDI notes, from a file or the microphone. It all
+            happens on this device; nothing is uploaded.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -261,36 +350,65 @@ export function AudioToMidi({
               if (file) void open(file)
             }}
           />
-          <button
-            type="button"
-            disabled={working}
-            onClick={() => inputRef.current?.click()}
-            onDragOver={(e) => {
-              e.preventDefault()
-              setOver(true)
-            }}
-            onDragLeave={() => setOver(false)}
-            onDrop={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              setOver(false)
-              const file = e.dataTransfer.files[0]
-              if (file) void open(file)
-            }}
-            className={cn(
-              "flex flex-col items-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors outline-none hover:border-primary/60 hover:bg-muted/40 focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60",
-              over && "border-primary bg-primary/5"
-            )}
-          >
-            <FileAudioIcon className="size-8 text-muted-foreground" />
-            <span className="font-medium">
-              {loaded ? "Choose another recording" : "Choose a recording"}
-            </span>
-            <span className="text-sm text-muted-foreground">
-              Or drop a WAV file here (MP3, OGG and FLAC work too). Up to{" "}
-              {MAX_SECONDS / 60} minutes.
-            </span>
-          </button>
+          {recording !== null ? (
+            <RecordingPanel
+              state={recording}
+              onStop={() => void stopRecording(true)}
+              onCancel={() => void stopRecording(false)}
+            />
+          ) : (
+            <div
+              className={cn(
+                "grid gap-3",
+                canRecord() && "sm:grid-cols-[2fr_1fr]"
+              )}
+            >
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => inputRef.current?.click()}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  setOver(true)
+                }}
+                onDragLeave={() => setOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setOver(false)
+                  const file = e.dataTransfer.files[0]
+                  if (file) void open(file)
+                }}
+                className={cn(
+                  "flex flex-col items-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors outline-none hover:border-primary/60 hover:bg-muted/40 focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60",
+                  over && "border-primary bg-primary/5"
+                )}
+              >
+                <FileAudioIcon className="size-8 text-muted-foreground" />
+                <span className="font-medium">
+                  {loaded ? "Choose another recording" : "Choose a recording"}
+                </span>
+                <span className="text-sm text-muted-foreground">
+                  Or drop a WAV file here (MP3, OGG and FLAC work too). Up to{" "}
+                  {MAX_SECONDS / 60} minutes.
+                </span>
+              </button>
+              {canRecord() && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void record()}
+                  className="flex flex-col items-center justify-center gap-2 rounded-xl border-2 px-4 py-8 text-center transition-colors outline-none hover:border-primary/60 hover:bg-muted/40 focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60"
+                >
+                  <MicIcon className="size-8 text-muted-foreground" />
+                  <span className="font-medium">Record</span>
+                  <span className="text-sm text-muted-foreground">
+                    Sing, hum or play into the microphone.
+                  </span>
+                </button>
+              )}
+            </div>
+          )}
 
           {loaded && (
             <div className="flex flex-col gap-2">
@@ -336,13 +454,13 @@ export function AudioToMidi({
               step={0.05}
               value={[sensitivity]}
               onValueChange={([v]) => setSensitivity(v)}
-              disabled={working}
+              disabled={busy}
             />
             {loaded && (
               <Button
                 variant="outline"
                 className="self-start"
-                disabled={working}
+                disabled={busy}
                 onClick={() => void convert(loaded)}
               >
                 <WandSparklesIcon /> Find notes again
@@ -439,9 +557,14 @@ export function AudioToMidi({
                   onOpenAsSong(parsed, `${name}.mid`)
                 }}
               >
-                <SquarePenIcon /> Open as a song
+                <SquarePenIcon /> Make an arrangement
               </Button>
             </div>
+            <p className="text-sm text-muted-foreground">
+              Make an arrangement opens the tune as a new song, with chords
+              worked out to fit it and a bass line and drums, ready to edit and
+              export as MIDI.
+            </p>
           </CardContent>
         </Card>
       )}
@@ -516,5 +639,75 @@ function Picture({
         />
       )}
     </svg>
+  )
+}
+
+/** Shown while recording: how long, how loud, and Stop. */
+function RecordingPanel({
+  state,
+  onStop,
+  onCancel,
+}: {
+  state: "starting" | { seconds: number; level: number; full: boolean }
+  onStop: () => void
+  onCancel: () => void
+}) {
+  const starting = state === "starting"
+  const level = starting ? 0 : state.level
+  // A log scale, so quiet singing still moves the meter: -48 dB to 0 dB.
+  const meter = level > 0 ? Math.max(0, 1 + Math.log10(level) / 2.4) : 0
+  return (
+    <div className="flex flex-col gap-4 rounded-xl border-2 border-destructive/50 px-4 py-6">
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex items-center gap-2 font-medium" role="status">
+          {starting ? (
+            <>
+              <Loader2Icon className="size-4 animate-spin" />
+              Waiting for the microphone…
+            </>
+          ) : (
+            <>
+              <span className="size-3 rounded-full bg-destructive motion-safe:animate-pulse" />
+              Recording
+            </>
+          )}
+        </span>
+        {!starting && (
+          <span className="font-mono text-lg tabular-nums" aria-hidden>
+            {fmt(state.seconds)}
+          </span>
+        )}
+      </div>
+      <div
+        role="meter"
+        aria-label="Microphone level"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(meter * 100)}
+        className="h-2 overflow-hidden rounded-full bg-muted"
+      >
+        <div
+          className={cn(
+            "h-full transition-[width] duration-75",
+            level > 0.98 ? "bg-destructive" : "bg-primary"
+          )}
+          style={{ width: `${meter * 100}%` }}
+        />
+      </div>
+      {!starting && state.full && (
+        <p className="text-sm text-muted-foreground">
+          That's the longest a take can be ({MAX_RECORDING / 60} minutes). Stop
+          to find its notes.
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button variant="destructive" onClick={onStop} disabled={starting}>
+          <SquareIcon /> Stop and find notes
+        </Button>
+        <Button variant="outline" onClick={onCancel}>
+          <XIcon /> Cancel
+        </Button>
+      </div>
+    </div>
   )
 }
