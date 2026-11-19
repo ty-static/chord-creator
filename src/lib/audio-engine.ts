@@ -363,6 +363,45 @@ export class AudioEngine {
     return v
   }
 
+  /**
+   * The metronome: a short woodblock-like blip, higher on the first beat of
+   * a bar. It goes straight to the master, so the mix (muting the drums,
+   * say) and reverb leave it alone, and it's never in an export.
+   */
+  clickVoice(): Voice {
+    if (this.click) return this.click
+    const ctx = this.context()
+    const sounding = new Set<OscillatorNode>()
+    const stopOsc = (osc: OscillatorNode) => {
+      try {
+        osc.stop()
+      } catch {
+        /* already stopped */
+      }
+    }
+    this.click = this.track({
+      stop: () => sounding.forEach(stopOsc),
+      start: ({ time: t, velocity }) => {
+        const accent = velocity >= 100
+        const osc = ctx.createOscillator()
+        osc.type = "sine"
+        osc.frequency.value = accent ? 1760 : 1320
+        const g = ctx.createGain()
+        g.gain.setValueAtTime(0.0001, t)
+        g.gain.exponentialRampToValueAtTime(accent ? 0.5 : 0.32, t + 0.002)
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05)
+        osc.connect(g).connect(this.master)
+        osc.start(t)
+        osc.stop(t + 0.06)
+        sounding.add(osc)
+        osc.onended = () => sounding.delete(osc)
+        return () => stopOsc(osc)
+      },
+    })
+    return this.click
+  }
+  private click: Voice | undefined
+
   private noise: AudioBuffer | null = null
 
   /** Synthesized drum kit, used offline or as the "Basic Synth" drum choice. */

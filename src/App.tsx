@@ -50,6 +50,7 @@ import {
   SectionSettings,
   sectionStyleSummary,
 } from "@/components/section-settings"
+import { TempoControl } from "@/components/tempo-control"
 import { SongTitle } from "@/components/song-title"
 import {
   type LoopRange,
@@ -92,6 +93,7 @@ import {
   buildEvents,
   endingBeats,
   barLines,
+  clickBeats,
   keyChanges,
   layout,
   meterChanges,
@@ -206,6 +208,29 @@ function MountWhen({
 const TOUR_KEY = "chord-creator:tour-seen"
 /** Whether Play counts in a bar first (a preference, not part of the song). */
 const COUNT_IN_KEY = "chord-creator:count-in"
+/** Whether the metronome clicks while playing (a preference too). */
+const METRONOME_KEY = "chord-creator:metronome"
+
+/** A switch remembered in local storage. */
+function useStoredSwitch(key: string) {
+  const [on, setOn] = React.useState(() => {
+    try {
+      return localStorage.getItem(key) === "1"
+    } catch {
+      return false
+    }
+  })
+  const set = (next: boolean) => {
+    setOn(next)
+    try {
+      if (next) localStorage.setItem(key, "1")
+      else localStorage.removeItem(key)
+    } catch {
+      // Storage blocked: the setting lasts until the page closes.
+    }
+  }
+  return [on, set] as const
+}
 
 // The song library, and the song to open first. Opened once per page load
 // (outside React, so StrictMode's double render can't add a song twice).
@@ -248,18 +273,8 @@ export function App() {
   const [songId, setSongId] = React.useState(() => bootSong().id)
   useUndoShortcuts(history.undo, history.redo)
   const [loop, setLoop] = React.useState(true)
-  const [countIn, setCountInState] = React.useState(
-    () => localStorage.getItem(COUNT_IN_KEY) === "1"
-  )
-  const setCountIn = (on: boolean) => {
-    setCountInState(on)
-    try {
-      if (on) localStorage.setItem(COUNT_IN_KEY, "1")
-      else localStorage.removeItem(COUNT_IN_KEY)
-    } catch {
-      // Storage blocked: the setting lasts until the page closes.
-    }
-  }
+  const [countIn, setCountIn] = useStoredSwitch(COUNT_IN_KEY)
+  const [metronome, setMetronome] = useStoredSwitch(METRONOME_KEY)
   const [scope, setScope] = React.useState<ExportScope>("all")
   const [rendering, setRendering] = React.useState<{
     kind: "wav" | "stems"
@@ -525,6 +540,7 @@ export function App() {
       song.ending,
     ]
   )
+  const clicks = React.useMemo(() => clickBeats(song, placed), [song, placed])
   const playSettings = (
     opts: { loop?: boolean; range?: LoopRange | null } = {}
   ): PlaySettings => {
@@ -539,6 +555,7 @@ export function App() {
       loopStart: range?.start,
       loopEnd: range?.end,
       instruments: song.instruments,
+      clicks: metronome ? clicks : undefined,
     }
   }
 
@@ -1432,28 +1449,33 @@ export function App() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex flex-col gap-2">
-                <Label className="flex justify-between">
-                  Tempo{" "}
-                  <span className="font-mono text-muted-foreground">
-                    {song.bpm} BPM
-                  </span>
-                </Label>
-                <Slider
-                  aria-label="Tempo"
-                  value={[song.bpm]}
-                  min={50}
-                  max={200}
-                  step={1}
-                  onValueChange={([v]) =>
-                    patch({ bpm: v }, { coalesce: "bpm" })
-                  }
-                />
+              <TempoControl
+                bpm={song.bpm}
+                onChange={(bpm, coalesce) =>
+                  patch({ bpm }, coalesce ? { coalesce: "bpm" } : undefined)
+                }
+              >
                 {hasTempoChanges(tempo) && (
                   <p className="text-xs text-muted-foreground">
                     Some sections change it (see Section style).
                   </p>
                 )}
+              </TempoControl>
+              <div className="flex items-center justify-between gap-3">
+                <Label
+                  htmlFor="metronome"
+                  className="flex flex-col items-start gap-0.5"
+                >
+                  Metronome
+                  <span className="text-xs font-normal text-muted-foreground">
+                    Clicks on the beat while playing (not in exports)
+                  </span>
+                </Label>
+                <Switch
+                  id="metronome"
+                  checked={metronome}
+                  onCheckedChange={setMetronome}
+                />
               </div>
               <div className="flex items-center justify-between gap-3">
                 <Label

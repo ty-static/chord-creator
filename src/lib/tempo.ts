@@ -13,6 +13,31 @@ export interface TempoChange {
   bpm: number
 }
 
+/** The song's tempo range, in BPM. */
+export const MIN_BPM = 50
+export const MAX_BPM = 200
+
+/** A tempo typed or tapped in, rounded and kept in range. */
+export const clampBpm = (bpm: number) =>
+  Math.min(MAX_BPM, Math.max(MIN_BPM, Math.round(bpm)))
+
+/** Taps further apart than this start a new count. */
+export const TAP_RESET_MS = 2000
+
+/**
+ * The tempo of a run of taps (times in ms, oldest first): the average gap
+ * between the last few, once there are two. Null until then.
+ */
+export function tapTempo(times: number[]): number | null {
+  // Only the taps since the last long pause, and at most the last eight.
+  let from = times.length - 1
+  while (from > 0 && times[from] - times[from - 1] <= TAP_RESET_MS) from--
+  const run = times.slice(Math.max(from, times.length - 8))
+  if (run.length < 2) return null
+  const gap = (run.at(-1)! - run[0]) / (run.length - 1)
+  return gap > 0 ? clampBpm(60_000 / gap) : null
+}
+
 /** Section tempos, as a percentage of the song's tempo. */
 export const SECTION_TEMPOS: { value: number; label: string }[] = [
   { value: 50, label: "Half time" },

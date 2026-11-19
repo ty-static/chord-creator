@@ -22,10 +22,13 @@ async function loadVoices(instruments: TrackInstruments) {
   const voices = await Promise.all(
     TRACKS.map((t) => engine.voice(instruments[t], t))
   )
-  return Object.fromEntries(TRACKS.map((t, i) => [t, voices[i]])) as Record<
-    TrackName,
-    Voice
-  >
+  return {
+    ...(Object.fromEntries(TRACKS.map((t, i) => [t, voices[i]])) as Record<
+      TrackName,
+      Voice
+    >),
+    click: engine.clickVoice(),
+  }
 }
 
 /** Plays NoteEvents through the sampled-instrument engine and reports a beat playhead.

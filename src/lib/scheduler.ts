@@ -25,6 +25,13 @@ export interface PlaySettings {
   loopStart?: number
   loopEnd?: number
   instruments: TrackInstruments
+  /** Metronome clicks (playback only), in beats; `accent` on each bar's first. */
+  clicks?: Click[]
+}
+
+export interface Click {
+  beat: number
+  accent?: boolean
 }
 
 /** Audio scheduling runs this far ahead of the clock (seconds). It's longer
@@ -45,9 +52,24 @@ export interface Anchor {
   spb: number
 }
 
+/** A voice per track, and the metronome's click (the drums' hi-hat if none). */
+export type Voices = Record<TrackName, Pick<Voice, "start">> & {
+  click?: Pick<Voice, "start">
+}
+
+/** Play a click: on the click voice, or a hi-hat on the drums. */
+function click(voices: Voices, time: number, accent: boolean) {
+  return (voices.click ?? voices.drums).start({
+    note: CLICK_NOTE,
+    time,
+    duration: 0.1,
+    velocity: accent ? 120 : 84,
+  })
+}
+
 export interface Transport {
   token: number
-  voices: Record<TrackName, Pick<Voice, "start">>
+  voices: Voices
   instrumentsKey: string
   settings: PlaySettings
   /** Next beat to schedule, and the audio time it plays at. */
@@ -112,15 +134,7 @@ export function createTransport(opts: {
   const scheduled: Transport["scheduled"] = (opts.countIn?.clicks ?? []).map(
     (beat, i) => {
       const time = clicksAt + beat * spb
-      return {
-        time,
-        release: opts.voices.drums.start({
-          note: CLICK_NOTE,
-          time,
-          duration: 0.1,
-          velocity: i === 0 ? 120 : 84,
-        }),
-      }
+      return { time, release: click(opts.voices, time, i === 0) }
     }
   )
   return {
@@ -180,6 +194,11 @@ export function scheduleChunk(tr: Transport) {
       velocity: e.velocity,
     })
     tr.scheduled.push({ time, release })
+  }
+  for (const c of s.clicks ?? []) {
+    if (c.beat < from || c.beat >= to) continue
+    const time = tr.cursorTime + (c.beat - from) * spb
+    tr.scheduled.push({ time, release: click(tr.voices, time, !!c.accent) })
   }
   tr.carry = false
   tr.cursorTime += (to - from) * spb

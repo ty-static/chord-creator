@@ -46,12 +46,15 @@ import {
 import { MAX_SECTIONS, MAX_SLOTS, makeSection } from "@/lib/sections"
 import { type MeterId, drumSteps, isMeterId, meterOf } from "@/lib/meter"
 import { isChordStyle } from "@/lib/rhythm"
-import { MAX_SECTION_TEMPO, MIN_SECTION_TEMPO } from "@/lib/tempo"
+import {
+  MAX_BPM,
+  MAX_SECTION_TEMPO,
+  MIN_BPM,
+  MIN_SECTION_TEMPO,
+} from "@/lib/tempo"
 
 export const DEFAULT_TITLE = "Untitled song"
 export const MAX_TITLE = 60
-const MIN_BPM = 50
-const MAX_BPM = 200
 const MAX_CHORDS = 64
 const MAX_NOTES = 1024
 

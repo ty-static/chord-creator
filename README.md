@@ -24,8 +24,11 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   change per section.
 - **Chords outside the key** — secondary dominants (V7/V…), borrowed chords
   (iv, ♭VI, ♭VII, ♭III, the Neapolitan ♭II; V, IV and a Picardy I in minor),
-  and "next chord" suggestions from common progressions. A MIDI keyboard
-  recognises them too.
+  and "next chord" suggestions. A MIDI keyboard recognises them too.
+- **Chord suggestions** — the chords to try next, ranked by how often they
+  follow the last one, whether they carry on a well-known loop (I–V–vi–IV,
+  i–VI–III–VII…) and whether they land a cadence at the end of a four-bar
+  phrase, plus one colour from outside the key. Hover one to see why.
 - **Melody** — piano-roll editor (draw, drag, resize, keyboard nudging),
   generator with density control, per-bar regenerate / repeat motif
   (exact or following the chords), and note locking. Melodies can tie
@@ -76,7 +79,11 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
 - **Chord chart** — the chords of every section bar by bar, with the form,
   key, tempo and how each section is played. Switch to Roman numerals or
   another key, print it or save it as a PDF, or copy it as plain text.
-- **Count-in** — an optional bar of clicks before Play starts.
+- **Count-in and metronome** — an optional bar of clicks before Play
+  starts, and clicks on every beat while playing (in each section's time,
+  louder on the first beat of a bar). Neither is in exports, and muting the
+  drums doesn't silence them.
+- **Tempo** — drag the slider, type a BPM, or tap the beat on Tap.
 - **Swing and humanize** — a shuffle feel and small, repeatable changes in
   timing and loudness, so playback and exports sound less mechanical.
 - **My songs** — every song is saved in the browser as you work. Open,
@@ -151,6 +158,7 @@ Built with Vite, React 19, TypeScript, Tailwind CSS v4 and
 | `src/lib/tempo.ts`        | Tempo map: section tempos and slow-downs, beats to seconds                |
 | `src/lib/zip.ts`          | Minimal zip writer (for stems)                                            |
 | `src/lib/chart.ts`        | Chord chart: chords bar by bar, the form, plain-text copy                 |
+| `src/lib/suggest.ts`      | Next-chord suggestions: common moves, loops, cadences                     |
 | `src/lib/pwa.ts`          | Service worker registration, updates, install prompt, online status       |
 | `sw/service-worker.js`    | The service worker; the build adds the file list (see `vite.config.ts`)   |
 | `public/`                 | Web app manifest and icons (`icon.svg` is the source of the PNGs)         |

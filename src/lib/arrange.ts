@@ -13,7 +13,7 @@ import {
 import type { TrackInstruments } from "@/lib/instruments"
 import type { Mix } from "@/lib/audio-engine"
 import { type BassStyle, bassLine } from "@/lib/bass"
-import { type MeterId, barBeats, barSteps, meterOf } from "@/lib/meter"
+import { type MeterId, barBeats, barSteps, meterOf, pulses } from "@/lib/meter"
 import { type ChordStyle, chordHits } from "@/lib/rhythm"
 import {
   DRUM_PIECES,
@@ -178,6 +178,24 @@ export function barLines(song: Song, placed = layout(song)) {
     const bar = barBeats(sectionMeter(song, p.section))
     for (let b = 0; b < p.beats - 1e-9; b += bar)
       out.push({ start: p.start + b, beats: Math.min(bar, p.beats - b) })
+  }
+  return out
+}
+
+/** Where the metronome clicks: every felt beat of every bar, in each
+ *  section's time, with the first of each bar accented. */
+export function clickBeats(song: Song, placed = layout(song)) {
+  const out: { beat: number; accent?: boolean }[] = []
+  for (const p of placed) {
+    const m = sectionMeter(song, p.section)
+    const bar = barBeats(m)
+    for (let b = 0; b < p.beats - 1e-9; b += bar)
+      for (const [i, at] of pulses(m).entries())
+        if (b + at < p.beats - 1e-9)
+          out.push({
+            beat: p.start + b + at,
+            ...(i === 0 ? { accent: true } : {}),
+          })
   }
   return out
 }

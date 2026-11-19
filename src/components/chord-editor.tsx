@@ -64,10 +64,10 @@ import {
   outsideChords,
   randomProgression,
   romanNumeral,
-  suggestNext,
   uid,
   type Voicing,
 } from "@/lib/music"
+import { suggestChords } from "@/lib/suggest"
 import { type Meter, barBeats, lengthLabel } from "@/lib/meter"
 
 interface Props {
@@ -135,7 +135,7 @@ export function ChordEditor({
     onPreview(chordMidi(chord, musicKey))
   }
   const outside = outsideChords(musicKey)
-  const suggestions = suggestNext(chords[chords.length - 1], musicKey)
+  const suggestions = suggestChords(chords, musicKey, { bar: barBeats(meter) })
 
   return (
     <div className="flex flex-col gap-4">
@@ -210,22 +210,13 @@ export function ChordEditor({
                 <SparklesIcon className="size-3.5" />
                 {chords.length ? "Next" : "Start with"}
               </span>
-              {suggestions.map((c) => (
+              {suggestions.map(({ chord: c, reason }) => (
                 <PaletteChip
                   key={JSON.stringify(c)}
                   chord={c}
                   musicKey={musicKey}
                   onAdd={addChord}
-                  title={
-                    isOutside(c)
-                      ? outside.find(
-                          (o) =>
-                            o.chord.degree === c.degree &&
-                            o.chord.mode === c.mode &&
-                            !!o.chord.secondary === !!c.secondary
-                        )?.hint
-                      : "Often comes next"
-                  }
+                  title={reason}
                 />
               ))}
             </div>
@@ -556,7 +547,7 @@ export function ChordEditor({
             <button
               type="button"
               onClick={() =>
-                addChord(suggestions[0] ?? { degree: 0, type: "triad" })
+                addChord(suggestions[0]?.chord ?? { degree: 0, type: "triad" })
               }
               title="Adds the top suggestion"
               className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed text-sm text-muted-foreground transition-colors hover:border-primary hover:text-foreground sm:min-h-40"
