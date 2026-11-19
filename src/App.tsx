@@ -1,6 +1,7 @@
 import * as React from "react"
 import {
   AudioLinesIcon,
+  AudioWaveformIcon,
   DownloadIcon,
   FolderOpenIcon,
   LinkIcon,
@@ -13,6 +14,7 @@ import {
   LayersIcon,
   LibraryIcon,
   Loader2Icon,
+  Music2Icon,
   MonitorDownIcon,
   MoonIcon,
   PlayIcon,
@@ -24,6 +26,7 @@ import {
   UploadIcon,
   WifiOffIcon,
 } from "lucide-react"
+import { Tabs as TabsPrimitive } from "radix-ui"
 import { toast } from "sonner"
 
 import { ChordEditor } from "@/components/chord-editor"
@@ -139,6 +142,7 @@ import { Library, type LibraryEntry } from "@/lib/library"
 import { BASS_STYLES, type BassStyle, bassHint, bassLabel } from "@/lib/bass"
 import { CHORD_STYLES, chordStyleHint, chordStyleLabel } from "@/lib/rhythm"
 import { prefetchLazyModules } from "@/lib/prefetch"
+import { isAudioFile } from "@/lib/audio-files"
 import {
   SongFileError,
   decodeShare,
@@ -171,6 +175,11 @@ import {
 const ImportDialog = React.lazy(() =>
   import("@/components/import-dialog").then((m) => ({
     default: m.ImportDialog,
+  }))
+)
+const AudioToMidi = React.lazy(() =>
+  import("@/components/audio-to-midi").then((m) => ({
+    default: m.AudioToMidi,
   }))
 )
 const WelcomeTour = React.lazy(() =>
@@ -434,6 +443,23 @@ export function App() {
   // ---- MIDI file import (button or drag-and-drop)
   const [pendingImport, setPendingImport] =
     React.useState<PendingImport | null>(null)
+
+  // ---- Pages: the song editor, and turning a recording into MIDI
+  const [page, setPage] = React.useState<"song" | "audio">("song")
+  /** An audio file dropped or picked anywhere, for the Audio to MIDI page. */
+  const [droppedAudio, setDroppedAudio] = React.useState<{
+    file: File
+    n: number
+  } | null>(null)
+  // Once opened, the page stays mounted (hidden) so its results survive a
+  // trip to the song.
+  const [audioVisited, setAudioVisited] = React.useState(false)
+  const changePage = (next: string) => {
+    // What's playing belongs to the page being left.
+    player.stop()
+    setPage(next === "audio" ? "audio" : "song")
+    if (next === "audio") setAudioVisited(true)
+  }
   const fileRef = React.useRef<HTMLInputElement>(null)
 
   // ---- MIDI keyboard: play-through and chord input
@@ -902,14 +928,18 @@ export function App() {
     }
   }, [])
 
-  // ---- Opening files: MIDI or song files, by button or drop
+  // ---- Opening files: MIDI or song files (or a recording, for the Audio to
+  // MIDI page), by button or drop
   const openFile = (file: File) => {
     if (/\.json$/i.test(file.name)) void onSongFile(file)
     else if (/\.midi?$/i.test(file.name)) void openMidiFile(file)
-    else
+    else if (isAudioFile(file)) {
+      changePage("audio")
+      setDroppedAudio((d) => ({ file, n: (d?.n ?? 0) + 1 }))
+    } else
       toast.error(`Can't open ${file.name}`, {
         description:
-          "Choose a MIDI file (.mid) or a Static Sound song file (.json).",
+          "Choose a MIDI file (.mid), a Static Sound song file (.json) or a recording (.wav) to turn into MIDI.",
       })
   }
   const onSongFile = React.useEffectEvent(async (file: File) => {
@@ -983,7 +1013,10 @@ export function App() {
   }, [])
 
   // Space bar = play / stop (unless typing or using a control that needs it).
-  const onSpace = React.useEffectEvent(() => togglePlay())
+  // (The Audio to MIDI page has no song to play, but Space still stops.)
+  const onSpace = React.useEffectEvent(() =>
+    page === "song" ? togglePlay() : player.stop()
+  )
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== " " || e.repeat || e.ctrlKey || e.metaKey || e.altKey)
@@ -1354,515 +1387,581 @@ export function App() {
         </div>
       </header>
 
-      <main
-        id="editor"
-        tabIndex={-1}
-        className="mx-auto grid max-w-7xl gap-4 px-3 py-4 outline-none sm:gap-6 sm:px-4 sm:py-6 lg:grid-cols-[300px_1fr]"
-      >
-        <aside className="contents lg:sticky lg:top-20 lg:flex lg:flex-col lg:gap-4 lg:self-start">
-          <Card className="order-2 lg:order-none">
-            <CardHeader>
-              <CardTitle>Key & Tempo</CardTitle>
-              <CardDescription>
-                Everything follows the key you choose.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="key-root">Key</Label>
-                  <Select
-                    value={String(song.key.root)}
-                    onValueChange={(v) =>
-                      patch({ key: { ...song.key, root: Number(v) } })
-                    }
-                  >
-                    <SelectTrigger id="key-root" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ROOTS.map((r) => (
-                        <SelectItem key={r.value} value={String(r.value)}>
-                          {noteName(r.value, {
-                            root: r.value,
-                            scale: song.key.scale,
-                          })}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+      <Tabs value={page} onValueChange={changePage} className="block">
+        <nav
+          aria-label="Pages"
+          className="mx-auto max-w-7xl px-3 pt-3 sm:px-4 sm:pt-4"
+        >
+          <TabsList variant="line">
+            <TabsTrigger value="song" className="px-2.5">
+              <Music2Icon /> Song
+            </TabsTrigger>
+            <TabsTrigger value="audio" className="px-2.5">
+              <AudioWaveformIcon /> Audio to MIDI
+            </TabsTrigger>
+          </TabsList>
+        </nav>
+        <main id="editor" tabIndex={-1} className="outline-none">
+          {/* Plain panels: the tabs' own content style would shrink the text.
+            Not focusable themselves: they're full of controls. */}
+          <TabsPrimitive.Content
+            value="audio"
+            forceMount={audioVisited || undefined}
+            tabIndex={-1}
+            className="px-3 py-4 outline-none data-[state=inactive]:hidden sm:px-4 sm:py-6"
+          >
+            <React.Suspense
+              fallback={
+                <div className="flex justify-center py-16 text-muted-foreground">
+                  <Loader2Icon className="animate-spin" />
                 </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="scale">Scale</Label>
-                  <Select
-                    value={song.key.scale}
-                    onValueChange={(v) =>
-                      patch({ key: { ...song.key, scale: v as ScaleId } })
-                    }
-                  >
-                    <SelectTrigger id="scale" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(Object.keys(SCALES) as ScaleId[]).map((id) => (
-                        <SelectItem key={id} value={id}>
-                          {SCALES[id].label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {scaleNotes(song.key).map((n, i) => (
-                  <Badge
-                    key={i}
-                    variant={i === 0 ? "default" : "secondary"}
-                    className="font-mono"
-                  >
-                    {n}
-                  </Badge>
-                ))}
-              </div>
-              <Separator />
-              <div className="flex items-center justify-between gap-3">
-                <Label htmlFor="meter">Time signature</Label>
-                <Select
-                  value={meter.id}
-                  onValueChange={(v) => changeMeter(v as MeterId)}
-                >
-                  <SelectTrigger id="meter" size="sm" className="w-24">
-                    <SelectValue>{meter.label}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent align="end">
-                    {METERS.map((m) => (
-                      <SelectItem key={m.id} value={m.id} textValue={m.label}>
-                        <span className="flex flex-col">
-                          <span className="font-medium">{m.label}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {m.hint}
-                          </span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <TempoControl
-                bpm={song.bpm}
-                onChange={(bpm, coalesce) =>
-                  patch({ bpm }, coalesce ? { coalesce: "bpm" } : undefined)
-                }
-              >
-                {hasTempoChanges(tempo) && (
-                  <p className="text-xs text-muted-foreground">
-                    Some sections change it (see Section style).
-                  </p>
-                )}
-              </TempoControl>
-              <div className="flex items-center justify-between gap-3">
-                <Label
-                  htmlFor="metronome"
-                  className="flex flex-col items-start gap-0.5"
-                >
-                  Metronome
-                  <span className="text-xs font-normal text-muted-foreground">
-                    Clicks on the beat while playing (not in exports)
-                  </span>
-                </Label>
-                <Switch
-                  id="metronome"
-                  checked={metronome}
-                  onCheckedChange={setMetronome}
-                />
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <Label
-                  htmlFor="count-in"
-                  className="flex flex-col items-start gap-0.5"
-                >
-                  Count-in
-                  <span className="text-xs font-normal text-muted-foreground">
-                    A bar of clicks before Play starts
-                  </span>
-                </Label>
-                <Switch
-                  id="count-in"
-                  checked={countIn}
-                  onCheckedChange={setCountIn}
-                />
-              </div>
-              <FeelGroup
-                summary={[
-                  chordStyleLabel(song.chordStyle),
-                  song.swing ? `swing ${Math.round(song.swing * 100)}%` : "",
-                  song.humanize
-                    ? `humanize ${Math.round(song.humanize * 100)}%`
-                    : "",
-                  song.voiceLeading ? "smooth voice leading" : "",
-                  song.bass
-                    ? `${bassLabel(song.bassStyle).toLowerCase()} bass`
-                    : "no bass",
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              >
-                <FeelSlider
-                  label="Swing"
-                  hint="Delays the off-beats for a shuffle or groove feel"
-                  value={song.swing ?? 0}
-                  onChange={(swing) =>
-                    patch({ swing: swing || undefined }, { coalesce: "swing" })
-                  }
-                />
-                <FeelSlider
-                  label="Humanize"
-                  hint="Small changes in timing and loudness, like a live player"
-                  value={song.humanize ?? 0}
-                  onChange={(humanize) =>
-                    patch(
-                      { humanize: humanize || undefined },
-                      { coalesce: "humanize" }
-                    )
-                  }
-                />
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="chord-rhythm">Chord rhythm</Label>
-                  <Select
-                    value={song.chordStyle}
-                    onValueChange={(v) =>
-                      patch({ chordStyle: v as ChordStyle })
-                    }
-                  >
-                    <SelectTrigger id="chord-rhythm" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CHORD_STYLES.map((s) => (
-                        <SelectItem key={s.value} value={s.value}>
-                          {s.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    {chordStyleHint(song.chordStyle)}
-                  </p>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <Label
-                    htmlFor="voice-leading"
-                    className="flex flex-col items-start gap-0.5"
-                  >
-                    Smooth voice leading
-                    <span className="text-xs font-normal text-muted-foreground">
-                      Auto-pick inversions so chords move less
-                    </span>
-                  </Label>
-                  <Switch
-                    id="voice-leading"
-                    checked={song.voiceLeading}
-                    onCheckedChange={(voiceLeading) => patch({ voiceLeading })}
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="bass">Bass line</Label>
-                    <Switch
-                      id="bass"
-                      checked={song.bass}
-                      onCheckedChange={(bass) => patch({ bass })}
-                    />
-                  </div>
-                  {song.bass && (
-                    <>
+              }
+            >
+              <AudioToMidi
+                player={player}
+                instruments={song.instruments}
+                dropped={droppedAudio}
+                onOpenAsSong={(midi, filename) => {
+                  changePage("song")
+                  setPendingImport({ filename, midi })
+                }}
+              />
+            </React.Suspense>
+          </TabsPrimitive.Content>
+          <TabsPrimitive.Content
+            value="song"
+            tabIndex={-1}
+            className="mx-auto grid max-w-7xl gap-4 px-3 py-4 outline-none sm:gap-6 sm:px-4 sm:py-6 lg:grid-cols-[300px_1fr]"
+          >
+            <aside className="contents lg:sticky lg:top-20 lg:flex lg:flex-col lg:gap-4 lg:self-start">
+              <Card className="order-2 lg:order-none">
+                <CardHeader>
+                  <CardTitle>Key & Tempo</CardTitle>
+                  <CardDescription>
+                    Everything follows the key you choose.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="key-root">Key</Label>
                       <Select
-                        value={song.bassStyle ?? "root"}
+                        value={String(song.key.root)}
                         onValueChange={(v) =>
-                          patch({
-                            bassStyle:
-                              v === "root" ? undefined : (v as BassStyle),
-                          })
+                          patch({ key: { ...song.key, root: Number(v) } })
                         }
                       >
-                        <SelectTrigger
-                          aria-label="Bass pattern"
-                          className="w-full"
-                        >
+                        <SelectTrigger id="key-root" className="w-full">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {BASS_STYLES.map((b) => (
-                            <SelectItem key={b.value} value={b.value}>
-                              {b.label}
+                          {ROOTS.map((r) => (
+                            <SelectItem key={r.value} value={String(r.value)}>
+                              {noteName(r.value, {
+                                root: r.value,
+                                scale: song.key.scale,
+                              })}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="scale">Scale</Label>
+                      <Select
+                        value={song.key.scale}
+                        onValueChange={(v) =>
+                          patch({ key: { ...song.key, scale: v as ScaleId } })
+                        }
+                      >
+                        <SelectTrigger id="scale" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(Object.keys(SCALES) as ScaleId[]).map((id) => (
+                            <SelectItem key={id} value={id}>
+                              {SCALES[id].label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {scaleNotes(song.key).map((n, i) => (
+                      <Badge
+                        key={i}
+                        variant={i === 0 ? "default" : "secondary"}
+                        className="font-mono"
+                      >
+                        {n}
+                      </Badge>
+                    ))}
+                  </div>
+                  <Separator />
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor="meter">Time signature</Label>
+                    <Select
+                      value={meter.id}
+                      onValueChange={(v) => changeMeter(v as MeterId)}
+                    >
+                      <SelectTrigger id="meter" size="sm" className="w-24">
+                        <SelectValue>{meter.label}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent align="end">
+                        {METERS.map((m) => (
+                          <SelectItem
+                            key={m.id}
+                            value={m.id}
+                            textValue={m.label}
+                          >
+                            <span className="flex flex-col">
+                              <span className="font-medium">{m.label}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {m.hint}
+                              </span>
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <TempoControl
+                    bpm={song.bpm}
+                    onChange={(bpm, coalesce) =>
+                      patch({ bpm }, coalesce ? { coalesce: "bpm" } : undefined)
+                    }
+                  >
+                    {hasTempoChanges(tempo) && (
+                      <p className="text-xs text-muted-foreground">
+                        Some sections change it (see Section style).
+                      </p>
+                    )}
+                  </TempoControl>
+                  <div className="flex items-center justify-between gap-3">
+                    <Label
+                      htmlFor="metronome"
+                      className="flex flex-col items-start gap-0.5"
+                    >
+                      Metronome
+                      <span className="text-xs font-normal text-muted-foreground">
+                        Clicks on the beat while playing (not in exports)
+                      </span>
+                    </Label>
+                    <Switch
+                      id="metronome"
+                      checked={metronome}
+                      onCheckedChange={setMetronome}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <Label
+                      htmlFor="count-in"
+                      className="flex flex-col items-start gap-0.5"
+                    >
+                      Count-in
+                      <span className="text-xs font-normal text-muted-foreground">
+                        A bar of clicks before Play starts
+                      </span>
+                    </Label>
+                    <Switch
+                      id="count-in"
+                      checked={countIn}
+                      onCheckedChange={setCountIn}
+                    />
+                  </div>
+                  <FeelGroup
+                    summary={[
+                      chordStyleLabel(song.chordStyle),
+                      song.swing
+                        ? `swing ${Math.round(song.swing * 100)}%`
+                        : "",
+                      song.humanize
+                        ? `humanize ${Math.round(song.humanize * 100)}%`
+                        : "",
+                      song.voiceLeading ? "smooth voice leading" : "",
+                      song.bass
+                        ? `${bassLabel(song.bassStyle).toLowerCase()} bass`
+                        : "no bass",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  >
+                    <FeelSlider
+                      label="Swing"
+                      hint="Delays the off-beats for a shuffle or groove feel"
+                      value={song.swing ?? 0}
+                      onChange={(swing) =>
+                        patch(
+                          { swing: swing || undefined },
+                          { coalesce: "swing" }
+                        )
+                      }
+                    />
+                    <FeelSlider
+                      label="Humanize"
+                      hint="Small changes in timing and loudness, like a live player"
+                      value={song.humanize ?? 0}
+                      onChange={(humanize) =>
+                        patch(
+                          { humanize: humanize || undefined },
+                          { coalesce: "humanize" }
+                        )
+                      }
+                    />
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="chord-rhythm">Chord rhythm</Label>
+                      <Select
+                        value={song.chordStyle}
+                        onValueChange={(v) =>
+                          patch({ chordStyle: v as ChordStyle })
+                        }
+                      >
+                        <SelectTrigger id="chord-rhythm" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {CHORD_STYLES.map((s) => (
+                            <SelectItem key={s.value} value={s.value}>
+                              {s.label}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                       <p className="text-xs text-muted-foreground">
-                        {bassHint(song.bassStyle)}
+                        {chordStyleHint(song.chordStyle)}
                       </p>
-                    </>
-                  )}
-                </div>
-              </FeelGroup>
-            </CardContent>
-          </Card>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <Label
+                        htmlFor="voice-leading"
+                        className="flex flex-col items-start gap-0.5"
+                      >
+                        Smooth voice leading
+                        <span className="text-xs font-normal text-muted-foreground">
+                          Auto-pick inversions so chords move less
+                        </span>
+                      </Label>
+                      <Switch
+                        id="voice-leading"
+                        checked={song.voiceLeading}
+                        onCheckedChange={(voiceLeading) =>
+                          patch({ voiceLeading })
+                        }
+                      />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="bass">Bass line</Label>
+                        <Switch
+                          id="bass"
+                          checked={song.bass}
+                          onCheckedChange={(bass) => patch({ bass })}
+                        />
+                      </div>
+                      {song.bass && (
+                        <>
+                          <Select
+                            value={song.bassStyle ?? "root"}
+                            onValueChange={(v) =>
+                              patch({
+                                bassStyle:
+                                  v === "root" ? undefined : (v as BassStyle),
+                              })
+                            }
+                          >
+                            <SelectTrigger
+                              aria-label="Bass pattern"
+                              className="w-full"
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {BASS_STYLES.map((b) => (
+                                <SelectItem key={b.value} value={b.value}>
+                                  {b.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground">
+                            {bassHint(song.bassStyle)}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  </FeelGroup>
+                </CardContent>
+              </Card>
 
-          <div className="order-3 lg:order-none">
-            <SoundPanel
-              instruments={song.instruments}
-              mix={song.mix}
-              reverb={song.reverb}
-              bassEnabled={song.bass}
-              drumsEnabled={anyDrums}
-              status={player.status}
-              onInstrument={setInstrument}
-              onMix={setMix}
-              onReverb={(reverb) => patch({ reverb }, { coalesce: "reverb" })}
-            />
-          </div>
-
-          <Card className="order-4 lg:order-none">
-            <CardHeader>
-              <CardTitle>Export</CardTitle>
-              <CardDescription>
-                {song.sections.length}{" "}
-                {song.sections.length === 1 ? "section" : "sections"} ·{" "}
-                {+songBars(song).toFixed(1)}{" "}
-                {songBars(song) === 1 ? "bar" : "bars"} · {formString(song)}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              <Select
-                value={scope}
-                onValueChange={(v) => setScope(v as ExportScope)}
-              >
-                <SelectTrigger className="w-full" aria-label="What to export">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">
-                    Everything{" "}
-                    {[
-                      "chords",
-                      "melody",
-                      song.bass && "bass",
-                      anyDrums && "drums",
-                    ]
-                      .filter(Boolean)
-                      .join(" + ")
-                      .replace(/^./, (c) => `(${c}`)}
-                    )
-                  </SelectItem>
-                  <SelectItem value="chords">
-                    Chords only{song.bass ? " (+ bass)" : ""}
-                  </SelectItem>
-                  <SelectItem value="melody">Melody only</SelectItem>
-                  <SelectItem value="drums" disabled={!anyDrums}>
-                    Drums only
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              <div className="grid grid-cols-2 gap-2">
-                <Button size="lg" onClick={exportMidi}>
-                  <DownloadIcon /> MIDI
-                </Button>
-                <Button
-                  size="lg"
-                  variant="outline"
-                  onClick={exportWav}
-                  disabled={!!rendering}
-                >
-                  {rendering?.kind === "wav" ? (
-                    <>
-                      <Loader2Icon className="animate-spin" />
-                      {rendering.stage === "loading"
-                        ? "Loading…"
-                        : `${Math.round(rendering.fraction * 100)}%`}
-                    </>
-                  ) : (
-                    <>
-                      <AudioLinesIcon /> WAV
-                    </>
-                  )}
-                </Button>
+              <div className="order-3 lg:order-none">
+                <SoundPanel
+                  instruments={song.instruments}
+                  mix={song.mix}
+                  reverb={song.reverb}
+                  bassEnabled={song.bass}
+                  drumsEnabled={anyDrums}
+                  status={player.status}
+                  onInstrument={setInstrument}
+                  onMix={setMix}
+                  onReverb={(reverb) =>
+                    patch({ reverb }, { coalesce: "reverb" })
+                  }
+                />
               </div>
-              <Button
-                variant="outline"
-                onClick={() => void exportStems()}
-                disabled={!!rendering}
-                title="One WAV file per track, in a zip, for mixing in a DAW"
-              >
-                {rendering?.kind === "stems" ? (
-                  <>
-                    <Loader2Icon className="animate-spin" />
-                    {rendering.label ?? "Loading…"}
-                    {rendering.label &&
-                      ` · ${Math.round(rendering.fraction * 100)}%`}
-                  </>
-                ) : (
-                  <>
-                    <LayersIcon /> Stems (WAV per track)
-                  </>
-                )}
-              </Button>
-              <Button variant="outline" onClick={() => setChartOpen(true)}>
-                <FileMusicIcon /> Chord chart
-              </Button>
-              <Button variant="secondary" onClick={() => void shareSong()}>
-                <LinkIcon /> Copy share link
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                MIDI keeps separate tracks, tempo and key for your DAW. WAV is
-                the finished sound — your instruments, mix and reverb. Stems are
-                one WAV per track in a zip, lined up to mix in a DAW. A chord
-                chart is the chords bar by bar, to print or copy. A share link
-                sends the whole song for others to open and edit.
-              </p>
-            </CardContent>
-          </Card>
-        </aside>
 
-        {/* On phones the music comes first, then the settings. */}
-        <div className="order-1 flex min-w-0 flex-col gap-4 lg:order-none">
-          <SongForm
-            song={song}
-            placed={placed}
-            selectedId={section.id}
-            playingSlotId={playing?.slot.id ?? null}
-            loopSlotId={loop ? (loopSlot?.slot.id ?? null) : null}
-            onSelect={setSelectedId}
-            onChange={(next) => history.set(next)}
-            onLoopSlot={loopPart}
-            onPlayFrom={(beat) => playFrom(beat)}
-          />
-          <Timeline
-            musicKey={song.key}
-            barLines={barLines(song, placed)}
-            parts={timelineParts}
-            playheadBeat={
-              player.beat === null ? null : Math.min(player.beat, beats)
-            }
-            loopRange={loopRange}
-            activeChordKey={
-              playing && playingChord
-                ? `${playing.slot.id}:${playingChord.id}`
-                : null
-            }
-            selectedSectionId={section.id}
-            onSelectSection={setSelectedId}
-            onSeek={(beat) => playFrom(beat)}
-            onLoopChange={changeLoopRange}
-          />
-          <Tabs value={tab} onValueChange={setTab} className="min-w-0">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <TabsList>
-                <TabsTrigger value="chords">Chords</TabsTrigger>
-                <TabsTrigger value="melody">Melody</TabsTrigger>
-                <TabsTrigger value="drums">Drums</TabsTrigger>
-              </TabsList>
-              <EditingBadge
-                letter={sectionLetter(sectionIndex)}
-                colorIndex={sectionIndex}
-                name={section.name}
-                count={
-                  song.arrangement.filter((s) => s.section === section.id)
-                    .length
-                }
-                notes={sectionStyleSummary(section, {
-                  bass: song.bass,
-                  anyDrums,
-                  musicKey: song.key,
-                })}
+              <Card className="order-4 lg:order-none">
+                <CardHeader>
+                  <CardTitle>Export</CardTitle>
+                  <CardDescription>
+                    {song.sections.length}{" "}
+                    {song.sections.length === 1 ? "section" : "sections"} ·{" "}
+                    {+songBars(song).toFixed(1)}{" "}
+                    {songBars(song) === 1 ? "bar" : "bars"} · {formString(song)}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-3">
+                  <Select
+                    value={scope}
+                    onValueChange={(v) => setScope(v as ExportScope)}
+                  >
+                    <SelectTrigger
+                      className="w-full"
+                      aria-label="What to export"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">
+                        Everything{" "}
+                        {[
+                          "chords",
+                          "melody",
+                          song.bass && "bass",
+                          anyDrums && "drums",
+                        ]
+                          .filter(Boolean)
+                          .join(" + ")
+                          .replace(/^./, (c) => `(${c}`)}
+                        )
+                      </SelectItem>
+                      <SelectItem value="chords">
+                        Chords only{song.bass ? " (+ bass)" : ""}
+                      </SelectItem>
+                      <SelectItem value="melody">Melody only</SelectItem>
+                      <SelectItem value="drums" disabled={!anyDrums}>
+                        Drums only
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button size="lg" onClick={exportMidi}>
+                      <DownloadIcon /> MIDI
+                    </Button>
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      onClick={exportWav}
+                      disabled={!!rendering}
+                    >
+                      {rendering?.kind === "wav" ? (
+                        <>
+                          <Loader2Icon className="animate-spin" />
+                          {rendering.stage === "loading"
+                            ? "Loading…"
+                            : `${Math.round(rendering.fraction * 100)}%`}
+                        </>
+                      ) : (
+                        <>
+                          <AudioLinesIcon /> WAV
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => void exportStems()}
+                    disabled={!!rendering}
+                    title="One WAV file per track, in a zip, for mixing in a DAW"
+                  >
+                    {rendering?.kind === "stems" ? (
+                      <>
+                        <Loader2Icon className="animate-spin" />
+                        {rendering.label ?? "Loading…"}
+                        {rendering.label &&
+                          ` · ${Math.round(rendering.fraction * 100)}%`}
+                      </>
+                    ) : (
+                      <>
+                        <LayersIcon /> Stems (WAV per track)
+                      </>
+                    )}
+                  </Button>
+                  <Button variant="outline" onClick={() => setChartOpen(true)}>
+                    <FileMusicIcon /> Chord chart
+                  </Button>
+                  <Button variant="secondary" onClick={() => void shareSong()}>
+                    <LinkIcon /> Copy share link
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    MIDI keeps separate tracks, tempo and key for your DAW. WAV
+                    is the finished sound — your instruments, mix and reverb.
+                    Stems are one WAV per track in a zip, lined up to mix in a
+                    DAW. A chord chart is the chords bar by bar, to print or
+                    copy. A share link sends the whole song for others to open
+                    and edit.
+                  </p>
+                </CardContent>
+              </Card>
+            </aside>
+
+            {/* On phones the music comes first, then the settings. */}
+            <div className="order-1 flex min-w-0 flex-col gap-4 lg:order-none">
+              <SongForm
+                song={song}
+                placed={placed}
+                selectedId={section.id}
+                playingSlotId={playing?.slot.id ?? null}
+                loopSlotId={loop ? (loopSlot?.slot.id ?? null) : null}
+                onSelect={setSelectedId}
+                onChange={(next) => history.set(next)}
+                onLoopSlot={loopPart}
+                onPlayFrom={(beat) => playFrom(beat)}
               />
-              <SectionSettings
-                section={section}
+              <Timeline
                 musicKey={song.key}
-                songChordStyle={song.chordStyle}
-                songBassStyle={song.bassStyle ?? "root"}
-                songBpm={song.bpm}
-                songMeter={song.meter}
-                bass={song.bass}
-                onChange={patchSectionStyle}
+                barLines={barLines(song, placed)}
+                parts={timelineParts}
+                playheadBeat={
+                  player.beat === null ? null : Math.min(player.beat, beats)
+                }
+                loopRange={loopRange}
+                activeChordKey={
+                  playing && playingChord
+                    ? `${playing.slot.id}:${playingChord.id}`
+                    : null
+                }
+                selectedSectionId={section.id}
+                onSelectSection={setSelectedId}
+                onSeek={(beat) => playFrom(beat)}
+                onLoopChange={changeLoopRange}
               />
+              <Tabs value={tab} onValueChange={setTab} className="min-w-0">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <TabsList>
+                    <TabsTrigger value="chords">Chords</TabsTrigger>
+                    <TabsTrigger value="melody">Melody</TabsTrigger>
+                    <TabsTrigger value="drums">Drums</TabsTrigger>
+                  </TabsList>
+                  <EditingBadge
+                    letter={sectionLetter(sectionIndex)}
+                    colorIndex={sectionIndex}
+                    name={section.name}
+                    count={
+                      song.arrangement.filter((s) => s.section === section.id)
+                        .length
+                    }
+                    notes={sectionStyleSummary(section, {
+                      bass: song.bass,
+                      anyDrums,
+                      musicKey: song.key,
+                    })}
+                  />
+                  <SectionSettings
+                    section={section}
+                    musicKey={song.key}
+                    songChordStyle={song.chordStyle}
+                    songBassStyle={song.bassStyle ?? "root"}
+                    songBpm={song.bpm}
+                    songMeter={song.meter}
+                    bass={song.bass}
+                    onChange={patchSectionStyle}
+                  />
+                </div>
+                {!!section.transpose && (
+                  <p className="mt-2 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+                    This section plays {Math.abs(section.transpose)}{" "}
+                    {Math.abs(section.transpose) === 1
+                      ? "semitone"
+                      : "semitones"}{" "}
+                    {section.transpose > 0 ? "higher" : "lower"}, in{" "}
+                    <span className="font-medium text-foreground">
+                      {keyLabel(editKey)}
+                    </span>
+                    , so the chords and notes below are shown in that key. The
+                    song is in {keyLabel(song.key)}.
+                  </p>
+                )}
+                <TabsContent value="chords" className="mt-2">
+                  <KeyboardInputBar
+                    label="Chord input"
+                    hint="Play a chord and let go to add it. One key adds the chord built on that note."
+                    active={chordInput}
+                    onToggle={setChordInput}
+                  />
+                  <ChordEditor
+                    voicings={voicings}
+                    voiceLeading={song.voiceLeading}
+                    musicKey={editKey}
+                    meter={editMeter}
+                    chords={section.chords}
+                    onChange={(chords) => {
+                      // Trim melody notes that now fall past the end of the progression.
+                      const end = totalBeats(chords) * STEPS_PER_BEAT
+                      const melody = section.melody
+                        .filter((n) => n.start < end)
+                        .map((n) => ({
+                          ...n,
+                          length: Math.min(n.length, end - n.start),
+                        }))
+                      patchSection({ chords, melody })
+                    }}
+                    activeChordId={activeChordId}
+                    onPreview={(m) =>
+                      void player.preview(m, "chords", song.instruments.chords)
+                    }
+                  />
+                </TabsContent>
+                <TabsContent value="melody" className="mt-2">
+                  <MelodyEditor
+                    musicKey={editKey}
+                    sources={melodySources}
+                    leadTargets={leadTargets}
+                    key={section.id}
+                    chords={section.chords}
+                    melody={section.melody}
+                    onChange={(melody) => patchSection({ melody })}
+                    barSteps={barSteps(editMeter)}
+                    playheadBeat={localBeat}
+                    onPreview={(m) =>
+                      void player.preview(
+                        [m],
+                        "melody",
+                        song.instruments.melody
+                      )
+                    }
+                  />
+                </TabsContent>
+                <TabsContent value="drums" className="mt-2">
+                  <DrumEditor
+                    drums={section.drums}
+                    meter={editMeter}
+                    onChange={(drums) => patchSection({ drums })}
+                    crashOnChange={!!song.crashOnChange}
+                    onCrashOnChange={(on) =>
+                      patch({ crashOnChange: on || undefined })
+                    }
+                    playheadBeat={player.playing ? localBeat : null}
+                    onPreview={(m) =>
+                      void player.preview([m], "drums", song.instruments.drums)
+                    }
+                  />
+                </TabsContent>
+              </Tabs>
             </div>
-            {!!section.transpose && (
-              <p className="mt-2 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
-                This section plays {Math.abs(section.transpose)}{" "}
-                {Math.abs(section.transpose) === 1 ? "semitone" : "semitones"}{" "}
-                {section.transpose > 0 ? "higher" : "lower"}, in{" "}
-                <span className="font-medium text-foreground">
-                  {keyLabel(editKey)}
-                </span>
-                , so the chords and notes below are shown in that key. The song
-                is in {keyLabel(song.key)}.
-              </p>
-            )}
-            <TabsContent value="chords" className="mt-2">
-              <KeyboardInputBar
-                label="Chord input"
-                hint="Play a chord and let go to add it. One key adds the chord built on that note."
-                active={chordInput}
-                onToggle={setChordInput}
-              />
-              <ChordEditor
-                voicings={voicings}
-                voiceLeading={song.voiceLeading}
-                musicKey={editKey}
-                meter={editMeter}
-                chords={section.chords}
-                onChange={(chords) => {
-                  // Trim melody notes that now fall past the end of the progression.
-                  const end = totalBeats(chords) * STEPS_PER_BEAT
-                  const melody = section.melody
-                    .filter((n) => n.start < end)
-                    .map((n) => ({
-                      ...n,
-                      length: Math.min(n.length, end - n.start),
-                    }))
-                  patchSection({ chords, melody })
-                }}
-                activeChordId={activeChordId}
-                onPreview={(m) =>
-                  void player.preview(m, "chords", song.instruments.chords)
-                }
-              />
-            </TabsContent>
-            <TabsContent value="melody" className="mt-2">
-              <MelodyEditor
-                musicKey={editKey}
-                sources={melodySources}
-                leadTargets={leadTargets}
-                key={section.id}
-                chords={section.chords}
-                melody={section.melody}
-                onChange={(melody) => patchSection({ melody })}
-                barSteps={barSteps(editMeter)}
-                playheadBeat={localBeat}
-                onPreview={(m) =>
-                  void player.preview([m], "melody", song.instruments.melody)
-                }
-              />
-            </TabsContent>
-            <TabsContent value="drums" className="mt-2">
-              <DrumEditor
-                drums={section.drums}
-                meter={editMeter}
-                onChange={(drums) => patchSection({ drums })}
-                crashOnChange={!!song.crashOnChange}
-                onCrashOnChange={(on) =>
-                  patch({ crashOnChange: on || undefined })
-                }
-                playheadBeat={player.playing ? localBeat : null}
-                onPreview={(m) =>
-                  void player.preview([m], "drums", song.instruments.drums)
-                }
-              />
-            </TabsContent>
-          </Tabs>
-        </div>
-      </main>
+          </TabsPrimitive.Content>
+        </main>
+      </Tabs>
       <MountWhen when={tourOpen}>
         <WelcomeTour
           open={tourOpen}

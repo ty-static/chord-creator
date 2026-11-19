@@ -55,6 +55,11 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   and reverb, as 16-bit 44.1 kHz stereo.
 - **MIDI import** — reads `.mid` files, guesses each track's role and the key,
   and converts them into chords, melody and a drum pattern.
+- **Audio to MIDI** — its own page (the tab under the header): a recording of
+  one melody (WAV, or MP3/OGG/FLAC) becomes MIDI notes, on the device. Pitch
+  by YIN, a tempo guess from the onsets, then play, download as `.mid` or open
+  as a song through the MIDI import. Dropping a recording anywhere opens it
+  there. (Brought over from SoundCheck.)
 - **MIDI keyboard** — Web MIDI input (Chrome/Edge): play through the current
   instrument, add chords by playing them, step-enter melody notes.
 - **Section style** — per section: which tracks play (no drums in the intro,

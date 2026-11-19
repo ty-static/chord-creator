@@ -1,7 +1,8 @@
 // Code that isn't needed to show the page (dialogs, the MIDI parser, the WAV
-// renderer, the sampler library) is split into separate files. Once the page
-// is up and the browser is idle, fetch them in the background so the first
-// click on Import, My songs, Export or Play doesn't wait for a download.
+// renderer, the sampler library, the Audio to MIDI page) is split into
+// separate files. Once the page is up and the browser is idle, fetch them in
+// the background so the first click on Import, My songs, Export, Play or
+// Audio to MIDI doesn't wait for a download (and they work offline).
 //
 // The import() calls are the same ones the app makes later, so the browser
 // and the bundler's module cache share them: nothing is downloaded twice.
@@ -13,6 +14,7 @@ export const LAZY_MODULES: (() => Promise<unknown>)[] = [
   () => import("@/lib/midi-import"),
   () => import("@/lib/render"),
   () => import("@/components/welcome-tour"),
+  () => import("@/components/audio-to-midi"),
 ]
 
 type IdleWindow = Window & {
