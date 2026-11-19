@@ -1,4 +1,4 @@
-// The service worker that lets Chord Creator open and run offline.
+// The service worker that lets Static Sound open and run offline.
 //
 // The build (vite.config.ts) fills in __VERSION__ and __PRECACHE__, the list
 // of every file the app is made of. They're downloaded when the worker

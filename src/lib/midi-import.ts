@@ -1,4 +1,4 @@
-// Reading Standard MIDI Files and turning them into a Chord Creator song.
+// Reading Standard MIDI Files and turning them into a Static Sound song.
 
 import {
   DRUM_STEPS_PER_BEAT,

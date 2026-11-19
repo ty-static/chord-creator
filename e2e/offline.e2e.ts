@@ -4,7 +4,7 @@ test("installs as an app: manifest and icons", async ({ page, request }) => {
   await openApp(page)
   const href = await page.locator('link[rel="manifest"]').getAttribute("href")
   const manifest = await (await request.get(href!)).json()
-  expect(manifest.name).toBe("Chord Creator")
+  expect(manifest.name).toBe("Static Sound")
   expect(manifest.display).toBe("standalone")
   for (const icon of manifest.icons) {
     const res = await request.get(icon.src)
@@ -27,7 +27,7 @@ test("offers to install when the browser allows it", async ({ page }) => {
   })
   await page.getByRole("button", { name: "Examples and more" }).click()
   await page.getByRole("menuitem", { name: "Install app" }).click()
-  await expect(page.getByText("Chord Creator is installed")).toBeVisible()
+  await expect(page.getByText("Static Sound is installed")).toBeVisible()
 })
 
 test("opens and plays with no network once it has loaded", async ({

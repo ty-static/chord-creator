@@ -292,7 +292,7 @@ export function App() {
   React.useEffect(
     () =>
       registerServiceWorker((apply) =>
-        toast("A new version of Chord Creator is ready", {
+        toast("A new version of Static Sound is ready", {
           description: "Reload to use it. Your song is saved.",
           duration: Infinity,
           action: { label: "Reload", onClick: apply },
@@ -310,7 +310,7 @@ export function App() {
       toast("You're offline", {
         icon: <WifiOffIcon className="size-4" />,
         description:
-          "Chord Creator keeps working. Instruments you haven't played yet use the built-in synth until you're back online.",
+          "Static Sound keeps working. Instruments you haven't played yet use the built-in synth until you're back online.",
       })
   }, [online])
   const installApp = async () => {
@@ -319,7 +319,7 @@ export function App() {
         description: "In Safari, tap Share, then Add to Home Screen.",
       })
     if (await install())
-      toast.success("Chord Creator is installed", {
+      toast.success("Static Sound is installed", {
         description: "Open it from your apps. It works offline too.",
       })
   }
@@ -909,7 +909,7 @@ export function App() {
     else
       toast.error(`Can't open ${file.name}`, {
         description:
-          "Choose a MIDI file (.mid) or a Chord Creator song file (.json).",
+          "Choose a MIDI file (.mid) or a Static Sound song file (.json).",
       })
   }
   const onSongFile = React.useEffectEvent(async (file: File) => {
@@ -943,7 +943,7 @@ export function App() {
         description:
           err instanceof SongFileError
             ? err.message
-            : "The file doesn't look like a Chord Creator song.",
+            : "The file doesn't look like a Static Sound song.",
       })
     }
   })
@@ -1160,7 +1160,7 @@ export function App() {
           </div>
           <div className="mr-auto min-w-20">
             <h1 className="text-xs leading-tight text-muted-foreground max-sm:sr-only">
-              Chord Creator
+              Static Sound
             </h1>
             <SongTitle
               title={song.title}

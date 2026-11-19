@@ -1,4 +1,4 @@
-# Chord Creator
+# Static Sound
 
 Write chord progressions, melodies, bass and drums in any key, hear them with
 sampled instruments, and export a multi-track MIDI file for your DAW.

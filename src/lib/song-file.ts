@@ -255,7 +255,7 @@ function instruments(x: unknown): TrackInstruments {
  * Throws SongFileError if there's no music in it at all.
  */
 export function normalizeSong(raw: unknown): Song {
-  if (!isObj(raw)) throw new SongFileError("This isn't a Chord Creator song.")
+  if (!isObj(raw)) throw new SongFileError("This isn't a Static Sound song.")
 
   const meter: MeterId = isMeterId(raw.meter) ? raw.meter : "4/4"
   let sections: Section[]
@@ -353,7 +353,7 @@ export function parseSongFile(text: string): Song[] {
   if (isObj(data) && data.app === APP) {
     if (typeof data.version === "number" && data.version > FILE_VERSION)
       throw new SongFileError(
-        "This file was made by a newer version of Chord Creator. Reload the page and try again."
+        "This file was made by a newer version of Static Sound. Reload the page and try again."
       )
     if (Array.isArray(data.songs)) {
       const songs: Song[] = []

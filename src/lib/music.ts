@@ -1,4 +1,4 @@
-// Music theory helpers for Chord Creator.
+// Music theory helpers for Static Sound.
 // Chords and melody notes are stored as scale-degree indices, so changing the
 // key or scale re-maps everything automatically.
 

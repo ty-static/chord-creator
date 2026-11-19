@@ -27,7 +27,7 @@ const STEPS: {
 }[] = [
   {
     icon: MusicIcon,
-    title: "Welcome to Chord Creator",
+    title: "Welcome to Static Sound",
     body: "Write chord progressions and melodies, hear them with real instruments, and download a MIDI file you can drop into any DAW. Here's a 30-second tour.",
   },
   {

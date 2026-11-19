@@ -1,4 +1,4 @@
-// Installing Chord Creator as an app and running it offline: registers the
+// Installing Static Sound as an app and running it offline: registers the
 // service worker (sw.js, written by the build), offers updates, and keeps
 // the browser's install prompt for the "Install app" menu item.
 
