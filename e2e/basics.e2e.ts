@@ -119,3 +119,73 @@ test("suggests chords with a reason", async ({ page }) => {
   // The first song is I–V–vi–IV: going round again, I comes next.
   await expect(page.getByTitle("Carries on V–vi–IV–I")).toBeVisible()
 })
+
+test("replaces a chord, or inserts after it, from the palette", async ({
+  page,
+}) => {
+  await openApp(page)
+  const lane = page.getByTitle(/^Play from /)
+  await expect(lane).toHaveText(["C", "G", "Am", "F"])
+
+  await page
+    .getByRole("button", { name: "Change chord 2 from the palette" })
+    .click()
+  await expect(
+    page.getByRole("status").filter({ hasText: "Replacing" })
+  ).toHaveText(/Replacing chord #2 \(G\)/)
+  // The palette's Dm (ii).
+  await page
+    .getByRole("button", { name: /^Dm\s*ii$/ })
+    .first()
+    .click()
+  await expect(lane).toHaveText(["C", "Dm", "Am", "F"])
+
+  // Insert after: each chord goes after the last one put in.
+  await page.getByRole("radio", { name: "Insert after" }).click()
+  await page
+    .getByRole("button", { name: /^Em\s*iii$/ })
+    .first()
+    .click()
+  await page
+    .getByRole("button", { name: /^G\s*V$/ })
+    .first()
+    .click()
+  await expect(lane).toHaveText(["C", "Dm", "Em", "G", "Am", "F"])
+
+  await page.getByRole("button", { name: "Done" }).click()
+  await expect(page.getByText(/Inserting after/)).toBeHidden()
+  // Back to adding at the end.
+  await page
+    .getByRole("button", { name: /^C\s*I$/ })
+    .first()
+    .click()
+  await expect(lane).toHaveText(["C", "Dm", "Em", "G", "Am", "F", "C"])
+})
+
+test("says why the top chord is suggested", async ({ page }) => {
+  await openApp(page)
+  await expect(page.getByText("C: carries on V–vi–IV–I")).toBeVisible()
+})
+
+test.describe("on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 } })
+
+  test("shows the music first and folds the finer settings", async ({
+    page,
+  }) => {
+    await openApp(page)
+    const chords = await page
+      .getByText(/^Chords in /)
+      .first()
+      .boundingBox()
+    const key = await page.getByText("Key & Tempo").boundingBox()
+    expect(chords!.y).toBeLessThan(key!.y)
+
+    const feel = page.getByRole("button", { name: /Feel & arrangement/ })
+    await expect(feel).toHaveAttribute("aria-expanded", "false")
+    await expect(feel).toContainText("Block · roots bass")
+    await expect(page.getByRole("slider", { name: "Swing" })).toBeHidden()
+    await feel.click()
+    await expect(page.getByRole("slider", { name: "Swing" })).toBeVisible()
+  })
+})

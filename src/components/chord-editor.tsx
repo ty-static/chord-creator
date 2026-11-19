@@ -22,7 +22,9 @@ import {
   ChevronDownIcon,
   GripVerticalIcon,
   PlusIcon,
+  ReplaceIcon,
   ShuffleIcon,
+  XIcon,
   SparklesIcon,
   Trash2Icon,
   Volume2Icon,
@@ -39,6 +41,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   Select,
   SelectContent,
@@ -124,18 +127,60 @@ export function ChordEditor({
     if (from >= 0 && to >= 0) onChange(arrayMove(chords, from, to))
   }
 
+  // A chord picked to change: the palette then replaces it, or inserts
+  // after it, instead of adding at the end.
+  const [target, setTarget] = React.useState<{
+    id: string
+    mode: "replace" | "after"
+  } | null>(null)
+  const targetIndex = target ? chords.findIndex((c) => c.id === target.id) : -1
+  const picked = targetIndex >= 0 ? target : null
+  // Picking a chord far down the page brings the palette into view.
+  const bannerRef = React.useRef<HTMLDivElement>(null)
+  const pickedId = picked?.id
+  React.useEffect(() => {
+    if (pickedId)
+      bannerRef.current?.scrollIntoView?.({
+        block: "nearest",
+        behavior: "smooth",
+      })
+  }, [pickedId])
+
+  /** A new chord from the palette, a bar long. */
+  const fresh = (shape: ChordShape): Chord => ({
+    id: uid(),
+    ...shape,
+    inversion: 0,
+    beats: barBeats(meter),
+  })
+
+  /** Add a chord from the palette: at the end, or at the picked chord. */
   const addChord = (shape: ChordShape) => {
-    const chord: Chord = {
-      id: uid(),
-      ...shape,
-      inversion: 0,
-      beats: barBeats(meter),
+    if (picked?.mode === "replace") {
+      // Same place and length; the new chord's shape, in root position.
+      const old = chords[targetIndex]
+      const chord: Chord = { ...fresh(shape), id: old.id, beats: old.beats }
+      onChange(chords.map((c, i) => (i === targetIndex ? chord : c)))
+      onPreview(chordMidi(chord, musicKey))
+      return
     }
-    onChange([...chords, chord])
+    const chord = fresh(shape)
+    if (picked) {
+      // Insert after the picked chord, and carry on from the new one.
+      const next = [...chords]
+      next.splice(targetIndex + 1, 0, chord)
+      onChange(next)
+      setTarget({ id: chord.id, mode: "after" })
+    } else onChange([...chords, chord])
     onPreview(chordMidi(chord, musicKey))
   }
   const outside = outsideChords(musicKey)
-  const suggestions = suggestChords(chords, musicKey, { bar: barBeats(meter) })
+  // Suggestions for where the chord goes.
+  const before = !picked
+    ? chords
+    : chords.slice(0, targetIndex + (picked.mode === "after" ? 1 : 0))
+  const suggestions = suggestChords(before, musicKey, { bar: barBeats(meter) })
+  const top = suggestions[0]
 
   return (
     <div className="flex flex-col gap-4">
@@ -143,7 +188,9 @@ export function ChordEditor({
         <CardHeader className="max-sm:flex max-sm:flex-col">
           <CardTitle>Chords in {keyLabel(musicKey)}</CardTitle>
           <CardDescription>
-            Click a chord to add it to your progression.
+            Click a chord to add it to your progression. To change one, pick it
+            with its <ReplaceIcon className="inline size-3.5 align-[-2px]" />{" "}
+            button.
           </CardDescription>
           <CardAction className="flex flex-wrap items-center gap-2">
             <Select
@@ -184,6 +231,40 @@ export function ChordEditor({
           </CardAction>
         </CardHeader>
         <CardContent>
+          {picked && (
+            <div
+              ref={bannerRef}
+              role="status"
+              className="mb-3 flex scroll-mt-20 flex-wrap items-center gap-2 rounded-lg border-2 border-primary bg-background px-3 py-2 text-sm"
+            >
+              <span className="font-medium">
+                {picked.mode === "replace" ? "Replacing" : "Inserting after"}{" "}
+                chord #{targetIndex + 1} (
+                {chordName(chords[targetIndex], musicKey)})
+              </span>
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                size="sm"
+                value={picked.mode}
+                onValueChange={(v) =>
+                  v && setTarget({ ...picked, mode: v as "replace" | "after" })
+                }
+                aria-label="What a chord from the palette does"
+              >
+                <ToggleGroupItem value="replace">Replace</ToggleGroupItem>
+                <ToggleGroupItem value="after">Insert after</ToggleGroupItem>
+              </ToggleGroup>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="ml-auto"
+                onClick={() => setTarget(null)}
+              >
+                <XIcon /> Done
+              </Button>
+            </div>
+          )}
           <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
             {Array.from({ length: 7 }, (_, degree) => {
               const chord = { degree, type: "triad" as const, inversion: 0 }
@@ -208,7 +289,11 @@ export function ChordEditor({
             <div className="mt-3 flex flex-wrap items-center gap-1.5">
               <span className="mr-1 flex items-center gap-1 text-xs text-muted-foreground">
                 <SparklesIcon className="size-3.5" />
-                {chords.length ? "Next" : "Start with"}
+                {picked?.mode === "replace"
+                  ? "Try"
+                  : before.length
+                    ? "Next"
+                    : "Start with"}
               </span>
               {suggestions.map(({ chord: c, reason }) => (
                 <PaletteChip
@@ -219,6 +304,12 @@ export function ChordEditor({
                   title={reason}
                 />
               ))}
+              {top && (
+                <span className="basis-full text-xs text-muted-foreground sm:ml-1 sm:basis-auto">
+                  {chordName({ ...top.chord, inversion: 0 }, musicKey)}:{" "}
+                  {top.reason.charAt(0).toLowerCase() + top.reason.slice(1)}
+                </span>
+              )}
             </div>
           )}
           {outside.length > 0 && (
@@ -285,6 +376,8 @@ export function ChordEditor({
                     <Card
                       className={cn(
                         "gap-3 transition-shadow",
+                        picked?.id === chord.id &&
+                          "ring-2 ring-primary ring-offset-2 ring-offset-background",
                         active && "ring-2 ring-primary",
                         dragging && "shadow-xl ring-2 ring-primary/60"
                       )}
@@ -337,6 +430,27 @@ export function ChordEditor({
                             />
                           </Button>
 
+                          <Button
+                            size="icon-sm"
+                            variant={
+                              picked?.id === chord.id ? "secondary" : "ghost"
+                            }
+                            aria-label={`Change chord ${i + 1} from the palette`}
+                            aria-pressed={picked?.id === chord.id}
+                            title="Replace this chord, or insert after it, from the palette above"
+                            onClick={() =>
+                              setTarget(
+                                picked?.id === chord.id
+                                  ? null
+                                  : {
+                                      id: chord.id,
+                                      mode: picked?.mode ?? "replace",
+                                    }
+                              )
+                            }
+                          >
+                            <ReplaceIcon />
+                          </Button>
                           <Button
                             size="icon-sm"
                             variant="ghost"
@@ -546,9 +660,16 @@ export function ChordEditor({
             })}
             <button
               type="button"
-              onClick={() =>
-                addChord(suggestions[0]?.chord ?? { degree: 0, type: "triad" })
-              }
+              onClick={() => {
+                // Always at the end, with the suggestion for there.
+                setTarget(null)
+                const end = suggestChords(chords, musicKey, {
+                  bar: barBeats(meter),
+                })[0]
+                const chord = fresh(end?.chord ?? { degree: 0, type: "triad" })
+                onChange([...chords, chord])
+                onPreview(chordMidi(chord, musicKey))
+              }}
               title="Adds the top suggestion"
               className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed text-sm text-muted-foreground transition-colors hover:border-primary hover:text-foreground sm:min-h-40"
             >

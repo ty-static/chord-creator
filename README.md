@@ -17,7 +17,8 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   chords, melody and drum beat. Order and repeat them as a form (`A A B A`):
   drag, type the letters, loop one part, or split off a variation.
 - **Chords** — diatonic palette, presets, randomize, triads/7ths/9ths/sus,
-  inversions, drag to reorder, optional automatic voice leading.
+  inversions, drag to reorder, optional automatic voice leading. Pick a
+  chord to replace it from the palette, or to insert new chords after it.
 - **Chord rhythm** — block, pulse or arpeggio, or a pattern: guitar strums
   (down, down-up, up-down-up), off-beat skanks, the Charleston and
   oom-pah. Patterns follow the time signature (oom-pah-pah in 3/4) and can
@@ -28,7 +29,12 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
 - **Chord suggestions** — the chords to try next, ranked by how often they
   follow the last one, whether they carry on a well-known loop (I–V–vi–IV,
   i–VI–III–VII…) and whether they land a cadence at the end of a four-bar
-  phrase, plus one colour from outside the key. Hover one to see why.
+  phrase, plus one colour from outside the key. The reason for the top
+  pick shows beside them (hover the others). When a chord is picked to
+  replace or insert after, they're for that spot.
+- **Phone layout** — on phones the song, timeline and editors come first,
+  and the finer settings (swing, humanize, chord rhythm, voice leading,
+  bass) fold into a "Feel & arrangement" group with a summary.
 - **Melody** — piano-roll editor (draw, drag, resize, keyboard nudging),
   generator with density control, per-bar regenerate / repeat motif
   (exact or following the chords), and note locking. Melodies can tie

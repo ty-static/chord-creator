@@ -4,6 +4,7 @@ import {
   DownloadIcon,
   FolderOpenIcon,
   LinkIcon,
+  ChevronDownIcon,
   CircleHelpIcon,
   EllipsisVerticalIcon,
   FileMusicIcon,
@@ -135,8 +136,8 @@ import { type PlaySettings, usePlayer } from "@/lib/use-player"
 import { cn } from "@/lib/utils"
 import { EXAMPLES, type Example, blankSong } from "@/lib/examples"
 import { Library, type LibraryEntry } from "@/lib/library"
-import { BASS_STYLES, type BassStyle, bassHint } from "@/lib/bass"
-import { CHORD_STYLES, chordStyleHint } from "@/lib/rhythm"
+import { BASS_STYLES, type BassStyle, bassHint, bassLabel } from "@/lib/bass"
+import { CHORD_STYLES, chordStyleHint, chordStyleLabel } from "@/lib/rhythm"
 import { prefetchLazyModules } from "@/lib/prefetch"
 import {
   SongFileError,
@@ -1361,7 +1362,7 @@ export function App() {
         className="mx-auto grid max-w-7xl gap-4 px-3 py-4 outline-none sm:gap-6 sm:px-4 sm:py-6 lg:grid-cols-[300px_1fr]"
       >
         <aside className="contents lg:sticky lg:top-20 lg:flex lg:flex-col lg:gap-4 lg:self-start">
-          <Card className="order-1 lg:order-none">
+          <Card className="order-2 lg:order-none">
             <CardHeader>
               <CardTitle>Key & Tempo</CardTitle>
               <CardDescription>
@@ -1493,102 +1494,120 @@ export function App() {
                   onCheckedChange={setCountIn}
                 />
               </div>
-              <FeelSlider
-                label="Swing"
-                hint="Delays the off-beats for a shuffle or groove feel"
-                value={song.swing ?? 0}
-                onChange={(swing) =>
-                  patch({ swing: swing || undefined }, { coalesce: "swing" })
-                }
-              />
-              <FeelSlider
-                label="Humanize"
-                hint="Small changes in timing and loudness, like a live player"
-                value={song.humanize ?? 0}
-                onChange={(humanize) =>
-                  patch(
-                    { humanize: humanize || undefined },
-                    { coalesce: "humanize" }
-                  )
-                }
-              />
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="chord-rhythm">Chord rhythm</Label>
-                <Select
-                  value={song.chordStyle}
-                  onValueChange={(v) => patch({ chordStyle: v as ChordStyle })}
-                >
-                  <SelectTrigger id="chord-rhythm" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CHORD_STYLES.map((s) => (
-                      <SelectItem key={s.value} value={s.value}>
-                        {s.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  {chordStyleHint(song.chordStyle)}
-                </p>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <Label
-                  htmlFor="voice-leading"
-                  className="flex flex-col items-start gap-0.5"
-                >
-                  Smooth voice leading
-                  <span className="text-xs font-normal text-muted-foreground">
-                    Auto-pick inversions so chords move less
-                  </span>
-                </Label>
-                <Switch
-                  id="voice-leading"
-                  checked={song.voiceLeading}
-                  onCheckedChange={(voiceLeading) => patch({ voiceLeading })}
+              <FeelGroup
+                summary={[
+                  chordStyleLabel(song.chordStyle),
+                  song.swing ? `swing ${Math.round(song.swing * 100)}%` : "",
+                  song.humanize
+                    ? `humanize ${Math.round(song.humanize * 100)}%`
+                    : "",
+                  song.voiceLeading ? "smooth voice leading" : "",
+                  song.bass
+                    ? `${bassLabel(song.bassStyle).toLowerCase()} bass`
+                    : "no bass",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              >
+                <FeelSlider
+                  label="Swing"
+                  hint="Delays the off-beats for a shuffle or groove feel"
+                  value={song.swing ?? 0}
+                  onChange={(swing) =>
+                    patch({ swing: swing || undefined }, { coalesce: "swing" })
+                  }
                 />
-              </div>
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="bass">Bass line</Label>
+                <FeelSlider
+                  label="Humanize"
+                  hint="Small changes in timing and loudness, like a live player"
+                  value={song.humanize ?? 0}
+                  onChange={(humanize) =>
+                    patch(
+                      { humanize: humanize || undefined },
+                      { coalesce: "humanize" }
+                    )
+                  }
+                />
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="chord-rhythm">Chord rhythm</Label>
+                  <Select
+                    value={song.chordStyle}
+                    onValueChange={(v) =>
+                      patch({ chordStyle: v as ChordStyle })
+                    }
+                  >
+                    <SelectTrigger id="chord-rhythm" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CHORD_STYLES.map((s) => (
+                        <SelectItem key={s.value} value={s.value}>
+                          {s.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {chordStyleHint(song.chordStyle)}
+                  </p>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <Label
+                    htmlFor="voice-leading"
+                    className="flex flex-col items-start gap-0.5"
+                  >
+                    Smooth voice leading
+                    <span className="text-xs font-normal text-muted-foreground">
+                      Auto-pick inversions so chords move less
+                    </span>
+                  </Label>
                   <Switch
-                    id="bass"
-                    checked={song.bass}
-                    onCheckedChange={(bass) => patch({ bass })}
+                    id="voice-leading"
+                    checked={song.voiceLeading}
+                    onCheckedChange={(voiceLeading) => patch({ voiceLeading })}
                   />
                 </div>
-                {song.bass && (
-                  <>
-                    <Select
-                      value={song.bassStyle ?? "root"}
-                      onValueChange={(v) =>
-                        patch({
-                          bassStyle:
-                            v === "root" ? undefined : (v as BassStyle),
-                        })
-                      }
-                    >
-                      <SelectTrigger
-                        aria-label="Bass pattern"
-                        className="w-full"
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="bass">Bass line</Label>
+                    <Switch
+                      id="bass"
+                      checked={song.bass}
+                      onCheckedChange={(bass) => patch({ bass })}
+                    />
+                  </div>
+                  {song.bass && (
+                    <>
+                      <Select
+                        value={song.bassStyle ?? "root"}
+                        onValueChange={(v) =>
+                          patch({
+                            bassStyle:
+                              v === "root" ? undefined : (v as BassStyle),
+                          })
+                        }
                       >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {BASS_STYLES.map((b) => (
-                          <SelectItem key={b.value} value={b.value}>
-                            {b.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      {bassHint(song.bassStyle)}
-                    </p>
-                  </>
-                )}
-              </div>
+                        <SelectTrigger
+                          aria-label="Bass pattern"
+                          className="w-full"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {BASS_STYLES.map((b) => (
+                            <SelectItem key={b.value} value={b.value}>
+                              {b.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        {bassHint(song.bassStyle)}
+                      </p>
+                    </>
+                  )}
+                </div>
+              </FeelGroup>
             </CardContent>
           </Card>
 
@@ -1707,7 +1726,8 @@ export function App() {
           </Card>
         </aside>
 
-        <div className="order-2 flex min-w-0 flex-col gap-4 lg:order-none">
+        {/* On phones the music comes first, then the settings. */}
+        <div className="order-1 flex min-w-0 flex-col gap-4 lg:order-none">
           <SongForm
             song={song}
             placed={placed}
@@ -1943,6 +1963,50 @@ function EditingBadge({
       {count === 0 && <span>· not in the song</span>}
       {notes.length > 0 && <span>· {notes.join(" · ")}</span>}
     </p>
+  )
+}
+
+/**
+ * The finer settings of how the song plays, folded away on phones (with a
+ * summary of them) so the music comes first; open on bigger screens.
+ */
+function FeelGroup({
+  summary,
+  children,
+}: {
+  summary: string
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = React.useState(
+    () => window.matchMedia?.("(min-width: 1024px)").matches ?? true
+  )
+  const id = React.useId()
+  return (
+    <div className="flex flex-col gap-4 border-t pt-3">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={() => setOpen((o) => !o)}
+        className="-mx-1 flex items-start justify-between gap-2 rounded-md px-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-sm font-medium">Feel & arrangement</span>
+          {!open && (
+            <span className="text-xs text-muted-foreground">{summary}</span>
+          )}
+        </span>
+        <ChevronDownIcon
+          className={cn(
+            "mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-180"
+          )}
+        />
+      </button>
+      <div id={id} hidden={!open} className="flex flex-col gap-4">
+        {children}
+      </div>
+    </div>
   )
 }
 
