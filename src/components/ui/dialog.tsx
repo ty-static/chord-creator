@@ -56,10 +56,16 @@ function DialogContent({
   children,
   showCloseButton = true,
   onInteractOutside,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
 }) {
+  // Our dialogs open from state, not from a DialogTrigger, so Radix has no
+  // trigger to give focus back to. Remember what had focus when it opened
+  // (Radix moves focus in only after this event) and return there.
+  const opener = React.useRef<HTMLElement | null>(null)
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -69,6 +75,20 @@ function DialogContent({
           "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
+        onOpenAutoFocus={(e) => {
+          const el = document.activeElement
+          opener.current =
+            el instanceof HTMLElement && el !== document.body ? el : null
+          onOpenAutoFocus?.(e)
+        }}
+        onCloseAutoFocus={(e) => {
+          onCloseAutoFocus?.(e)
+          const el = opener.current
+          opener.current = null
+          if (e.defaultPrevented || !el?.isConnected) return
+          e.preventDefault()
+          el.focus()
+        }}
         onInteractOutside={(e) => {
           if (onToast(e)) e.preventDefault()
           onInteractOutside?.(e)

@@ -66,6 +66,37 @@ test.describe("accessibility (axe)", () => {
       expect(await violations(page)).toEqual([])
     })
 
+  for (const scheme of ["light", "dark"] as const)
+    test(`while playing, with WCAG 2.2 target sizes, ${scheme} theme`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: scheme })
+      await openApp(page)
+      await loadExample(page, "Pop Anthem")
+      await page.getByRole("button", { name: "Play", exact: true }).click()
+      const stop = page.getByRole("button", { name: "Stop", exact: true })
+      // Hovered: the Stop button's darkest background.
+      await stop.hover()
+      await page.waitForTimeout(600)
+      const { violations } = await new AxeBuilder({ page })
+        .withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"])
+        .exclude("[data-sonner-toaster]")
+        .analyze()
+      expect(
+        violations.flatMap((v) =>
+          v.nodes.map((n) => `${v.id}: ${n.target.join(" ")}`)
+        )
+      ).toEqual([])
+      await stop.click()
+    })
+
+  test("timeline chords say what they do", async ({ page }) => {
+    await openApp(page)
+    await expect(
+      page.getByRole("button", { name: /^Play from / }).first()
+    ).toBeVisible()
+  })
+
   test("section style, My songs and the phone layout", async ({ page }) => {
     await openApp(page)
     await loadExample(page, "Pop Anthem")
@@ -99,6 +130,19 @@ test.describe("keyboard", () => {
     await expect(skip).toBeFocused()
     await page.keyboard.press("Enter")
     await expect(page.locator("main")).toBeFocused()
+  })
+
+  test("closing a dialog gives focus back to its button", async ({ page }) => {
+    await openApp(page)
+    for (const name of ["Chord chart", "My songs"]) {
+      const button = page.getByRole("button", { name, exact: true })
+      await button.focus()
+      await page.keyboard.press("Enter")
+      await expect(page.getByRole("dialog")).toBeVisible()
+      await page.keyboard.press("Escape")
+      await expect(page.getByRole("dialog")).toBeHidden()
+      await expect(button, name).toBeFocused()
+    }
   })
 
   test("the drum grid works with arrow keys", async ({ page }) => {

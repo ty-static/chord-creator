@@ -10,7 +10,9 @@ test.describe("first visit", () => {
     await page.keyboard.press("Escape")
     await expect(tour).toBeHidden()
     await page.reload()
-    await expect(page.getByRole("button", { name: "Play" })).toBeVisible()
+    await expect(
+      page.getByRole("button", { name: "Play", exact: true })
+    ).toBeVisible()
     await expect(tour).toBeHidden()
   })
 })
@@ -49,14 +51,16 @@ test("adds chords from the palette, with undo and redo", async ({ page }) => {
 test("plays and stops", async ({ page }) => {
   await openApp(page)
   await loadExample(page, "Pop Anthem")
-  await page.getByRole("button", { name: "Play" }).click()
+  await page.getByRole("button", { name: "Play", exact: true }).click()
   const stop = page.getByRole("button", { name: "Stop" })
   await expect(stop).toBeVisible({ timeout: 15_000 })
   // The playhead moves.
   const playhead = page.locator(".bg-destructive.w-0\\.5")
   await expect(playhead).toBeVisible()
   await stop.click()
-  await expect(page.getByRole("button", { name: "Play" })).toBeVisible()
+  await expect(
+    page.getByRole("button", { name: "Play", exact: true })
+  ).toBeVisible()
 })
 
 test("switches between the editor tabs", async ({ page }) => {
@@ -87,6 +91,11 @@ test("sets the tempo by typing or tapping, and plays a metronome", async ({
   await bpm.fill("400")
   await bpm.press("Enter")
   await expect(bpm).toHaveValue("200")
+  // Escape throws away what was typed.
+  await bpm.fill("150")
+  await bpm.press("Escape")
+  await expect(bpm).toHaveValue("200")
+  await expect(bpm).not.toBeFocused()
 
   // Four taps half a second apart: 120 BPM.
   const tap = page.getByRole("button", { name: "Tap tempo" })

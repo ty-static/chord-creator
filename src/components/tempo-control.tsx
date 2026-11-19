@@ -28,10 +28,14 @@ export function TempoControl({
   const tapTimer = React.useRef(0)
   React.useEffect(() => () => window.clearTimeout(tapTimer.current), [])
 
+  // Escape blurs the box, and blurring saves: this skips that one save.
+  const cancelled = React.useRef(false)
   const commit = () => {
+    const skip = cancelled.current
+    cancelled.current = false
     if (draft === null) return
     const n = Number(draft)
-    if (draft.trim() && Number.isFinite(n) && clampBpm(n) !== bpm)
+    if (!skip && draft.trim() && Number.isFinite(n) && clampBpm(n) !== bpm)
       onChange(clampBpm(n), false)
     setDraft(null)
   }
@@ -69,7 +73,7 @@ export function TempoControl({
             onKeyDown={(e) => {
               if (e.key === "Enter") e.currentTarget.blur()
               if (e.key === "Escape") {
-                setDraft(null)
+                cancelled.current = true
                 e.currentTarget.blur()
               }
             }}

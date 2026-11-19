@@ -215,6 +215,7 @@ export function Timeline({
               <button
                 key={key}
                 type="button"
+                aria-label={`Play from ${chordName(chord, k)}`}
                 title={`Play from ${chordName(chord, k)}`}
                 onClick={() => onSeek(start)}
                 className={cn(

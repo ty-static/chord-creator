@@ -522,7 +522,7 @@ function SlotChip({
           <button
             type="button"
             aria-label={`${section.name} options`}
-            className="flex h-full items-center rounded-r-md px-1 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex h-full min-w-6 items-center justify-center rounded-r-md px-1 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
           >
             <ChevronDownIcon className="size-3.5" />
           </button>
