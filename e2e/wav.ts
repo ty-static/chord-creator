@@ -3,13 +3,14 @@ export function melodyWav(
   notes: number[],
   seconds = 0.45,
   gap = 0.05,
-  rate = 22050
+  rate = 22050,
+  lead = 0
 ) {
-  const len = Math.round(notes.length * (seconds + gap) * rate)
+  const len = Math.round((lead + notes.length * (seconds + gap)) * rate)
   const data = Buffer.alloc(len * 2)
   notes.forEach((midi, k) => {
     const f = 440 * 2 ** ((midi - 69) / 12)
-    const from = Math.round(k * (seconds + gap) * rate)
+    const from = Math.round((lead + k * (seconds + gap)) * rate)
     for (let i = 0; i < seconds * rate; i++) {
       const t = i / rate
       const env = Math.min(1, t / 0.01) * Math.exp(-t * 2)

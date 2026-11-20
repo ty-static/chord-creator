@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
+import { Switch } from "@/components/ui/switch"
 import {
   ANALYSIS_RATE,
   type FoundNote,
@@ -50,6 +51,7 @@ import {
   startRecording,
   takeToFile,
 } from "@/lib/recorder"
+import { clampBpm } from "@/lib/tempo"
 import type { PlaySettings } from "@/lib/use-player"
 import { cn } from "@/lib/utils"
 
@@ -75,18 +77,46 @@ interface Loaded {
   samples: Float32Array
   duration: number
   wave: Float32Array
+  /** Recorded to a click at this tempo (so no need to guess it). */
+  bpm?: number
 }
 
 interface Result {
   notes: FoundNote[]
   /** The tempo guessed from the recording. */
   detected: number
+  /** The tempo is the click's, not a guess. */
+  clicked: boolean
 }
 
 type Status =
   | { state: "idle" }
   | { state: "working"; step: string; progress: number }
   | { state: "error"; message: string }
+
+interface ClickSettings {
+  on: boolean
+  bpm: number
+}
+const CLICK_KEY = "chord-creator:record-click"
+function loadClick(): ClickSettings {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CLICK_KEY) ?? "null")
+    if (saved && typeof saved.on === "boolean" && Number.isFinite(saved.bpm))
+      return { on: saved.on, bpm: clampBpm(saved.bpm) }
+  } catch {
+    /* fall through */
+  }
+  return { on: false, bpm: 100 }
+}
+
+interface RecordingState {
+  seconds: number
+  level: number
+  full: boolean
+  /** Beats since the first downbeat (negative in the count-in), with a click. */
+  beat: number | null
+}
 
 const WAVE_WIDTH = 600
 /** The longest take from the microphone (seconds). */
@@ -111,6 +141,19 @@ export function AudioToMidi({
   const [result, setResult] = React.useState<Result | null>(null)
   const [bpm, setBpm] = React.useState(120)
   const [sensitivity, setSensitivity] = React.useState(0.5)
+  // Clicking along while recording (remembered between visits).
+  const [click, setClick] = React.useState(loadClick)
+  const { on: clickOn, bpm: clickBpm } = click
+  const changeClick = (next: Partial<ClickSettings>) =>
+    setClick((c) => {
+      const out = { ...c, ...next }
+      try {
+        localStorage.setItem(CLICK_KEY, JSON.stringify(out))
+      } catch {
+        /* private mode: just don't remember */
+      }
+      return out
+    })
   const [status, setStatus] = React.useState<Status>({ state: "idle" })
   const [over, setOver] = React.useState(false)
   const abort = React.useRef<AbortController | null>(null)
@@ -119,7 +162,7 @@ export function AudioToMidi({
   const attempt = React.useRef(0)
   // "starting" while the browser asks for the microphone.
   const [recording, setRecording] = React.useState<
-    null | "starting" | { seconds: number; level: number; full: boolean }
+    null | "starting" | RecordingState
   >(null)
   const working = status.state === "working"
   const busy = working || recording !== null
@@ -147,7 +190,7 @@ export function AudioToMidi({
       if (r)
         setRecording((s) =>
           s && s !== "starting"
-            ? { ...s, seconds: r.seconds(), level: r.level() }
+            ? { ...s, seconds: r.seconds(), level: r.level(), beat: r.beat() }
             : s
         )
       id = requestAnimationFrame(tick)
@@ -164,6 +207,7 @@ export function AudioToMidi({
     const mine = ++attempt.current
     try {
       const r = await startRecording({
+        click: clickOn ? { bpm: clickBpm, beatsPerBar: 4 } : undefined,
         maxSeconds: MAX_RECORDING,
         onLimit: () =>
           setRecording((s) =>
@@ -172,7 +216,12 @@ export function AudioToMidi({
       })
       if (mine !== attempt.current) return r.cancel()
       recorder.current = r
-      setRecording({ seconds: 0, level: 0, full: false })
+      setRecording({
+        seconds: 0,
+        level: 0,
+        full: false,
+        beat: clickOn ? -4 : null,
+      })
     } catch (err) {
       if (mine !== attempt.current) return
       setRecording(null)
@@ -197,7 +246,7 @@ export function AudioToMidi({
         state: "error",
         message: "That take was too short. Record for a little longer.",
       })
-    void open(takeToFile(take))
+    void open(takeToFile(take), take.bpm)
   }
 
   const convert = async (rec: Loaded, sens = sensitivity) => {
@@ -215,8 +264,8 @@ export function AudioToMidi({
       })
       const hop = HOP / ANALYSIS_RATE
       const notes = framesToNotes(frames, hop)
-      const detected = estimateTempo(notes, frames, hop)
-      setResult({ notes, detected })
+      const detected = rec.bpm ?? estimateTempo(notes, frames, hop)
+      setResult({ notes, detected, clicked: rec.bpm !== undefined })
       setBpm(detected)
       setStatus(
         notes.length
@@ -236,7 +285,7 @@ export function AudioToMidi({
     }
   }
 
-  const open = async (file: File) => {
+  const open = async (file: File, clickedBpm?: number) => {
     abort.current?.abort()
     player.stop()
     setResult(null)
@@ -264,6 +313,7 @@ export function AudioToMidi({
         samples,
         duration,
         wave: peaks(samples, WAVE_WIDTH),
+        bpm: clickedBpm,
       }
       setLoaded(rec)
       await convert(rec)
@@ -403,9 +453,44 @@ export function AudioToMidi({
                   <MicIcon className="size-8 text-muted-foreground" />
                   <span className="font-medium">Record</span>
                   <span className="text-sm text-muted-foreground">
-                    Sing, hum or play into the microphone.
+                    {clickOn
+                      ? `A bar of clicks at ${clickBpm} BPM, then sing, hum or play.`
+                      : "Sing, hum or play into the microphone."}
                   </span>
                 </button>
+              )}
+            </div>
+          )}
+
+          {recording === null && canRecord() && (
+            <div className="flex flex-col gap-3 rounded-xl border px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-col gap-0.5">
+                  <Label htmlFor="record-click">Click while recording</Label>
+                  <p
+                    id="record-click-help"
+                    className="text-sm text-muted-foreground"
+                  >
+                    A bar of count-in, then a click on every beat. Your notes
+                    land on the bars at this tempo, ready to arrange. Use
+                    headphones so the click isn't recorded.
+                  </p>
+                </div>
+                <Switch
+                  id="record-click"
+                  aria-describedby="record-click-help"
+                  checked={clickOn}
+                  onCheckedChange={(on) => changeClick({ on })}
+                  disabled={busy}
+                />
+              </div>
+              {clickOn && (
+                <TempoControl
+                  id="record-bpm"
+                  label="Click tempo"
+                  bpm={clickBpm}
+                  onChange={(bpm) => changeClick({ bpm })}
+                />
               )}
             </div>
           )}
@@ -425,6 +510,7 @@ export function AudioToMidi({
                 notes={notes}
                 duration={loaded.duration}
                 at={at}
+                bar={loaded.bpm ? (4 * 60) / loaded.bpm : undefined}
               />
               <audio
                 controls
@@ -515,7 +601,9 @@ export function AudioToMidi({
             <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {[
                 ["Key", keyLabel(key)],
-                ["Tempo found", `${result.detected} BPM`],
+                result.clicked
+                  ? ["Tempo (click)", `${result.detected} BPM`]
+                  : ["Tempo found", `${result.detected} BPM`],
                 [
                   "Range",
                   `${noteNameWithOctave(lowest, key)} – ${noteNameWithOctave(highest, key)}`,
@@ -586,11 +674,14 @@ function Picture({
   notes,
   duration,
   at,
+  bar,
 }: {
   wave: Float32Array
   notes: FoundNote[]
   duration: number
   at: number | null
+  /** Bar length in seconds, for a take recorded to a click. */
+  bar?: number
 }) {
   const H = 120
   const top = Math.max(...wave, 0.001)
@@ -616,6 +707,19 @@ function Picture({
       }
     >
       <path d={d} className="stroke-muted-foreground/40" strokeWidth={1} />
+      {bar &&
+        Array.from({ length: Math.floor(duration / bar) }, (_, i) => (
+          <line
+            key={i}
+            x1={x((i + 1) * bar)}
+            x2={x((i + 1) * bar)}
+            y1={0}
+            y2={H}
+            className="stroke-foreground/50"
+            strokeDasharray="3 3"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
       {notes.map((n, i) => (
         <rect
           key={i}
@@ -648,7 +752,7 @@ function RecordingPanel({
   onStop,
   onCancel,
 }: {
-  state: "starting" | { seconds: number; level: number; full: boolean }
+  state: "starting" | RecordingState
   onStop: () => void
   onCancel: () => void
 }) {
@@ -656,6 +760,9 @@ function RecordingPanel({
   const level = starting ? 0 : state.level
   // A log scale, so quiet singing still moves the meter: -48 dB to 0 dB.
   const meter = level > 0 ? Math.max(0, 1 + Math.log10(level) / 2.4) : 0
+  const beat = starting ? null : state.beat
+  // In the count-in: the beats still to come (4, 3, 2, 1).
+  const counting = beat !== null && beat < 0 ? Math.ceil(-beat) : null
   return (
     <div className="flex flex-col gap-4 rounded-xl border-2 border-destructive/50 px-4 py-6">
       <div className="flex items-center justify-between gap-3">
@@ -664,6 +771,11 @@ function RecordingPanel({
             <>
               <Loader2Icon className="size-4 animate-spin" />
               Waiting for the microphone…
+            </>
+          ) : counting !== null ? (
+            <>
+              <span className="size-3 rounded-full border-2 border-destructive" />
+              Count-in… {counting}
             </>
           ) : (
             <>
@@ -678,6 +790,30 @@ function RecordingPanel({
           </span>
         )}
       </div>
+      {beat !== null && (
+        <div className="flex items-center gap-3" aria-hidden>
+          <div className="flex gap-1.5">
+            {[0, 1, 2, 3].map((b) => (
+              <span
+                key={b}
+                className={cn(
+                  "size-4 rounded-full border-2",
+                  ((Math.floor(beat) % 4) + 4) % 4 === b
+                    ? counting !== null
+                      ? "border-foreground bg-foreground"
+                      : "border-primary bg-primary"
+                    : "border-muted-foreground/40"
+                )}
+              />
+            ))}
+          </div>
+          <span className="text-sm text-muted-foreground">
+            {counting !== null
+              ? "Starts on the next 1"
+              : `Bar ${Math.floor(beat / 4) + 1}`}
+          </span>
+        </div>
+      )}
       <div
         role="meter"
         aria-label="Microphone level"

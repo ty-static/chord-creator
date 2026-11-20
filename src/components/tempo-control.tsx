@@ -14,7 +14,12 @@ export function TempoControl({
   bpm,
   onChange,
   children,
+  id = "bpm",
+  label = "Tempo",
 }: {
+  /** For the BPM box (there can be two on a page). */
+  id?: string
+  label?: string
   bpm: number
   /** `coalesce`: part of a run of changes that undo as one (slider, taps). */
   onChange: (bpm: number, coalesce: boolean) => void
@@ -59,10 +64,10 @@ export function TempoControl({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
-        <Label htmlFor="bpm">Tempo</Label>
+        <Label htmlFor={id}>{label}</Label>
         <div className="flex items-center gap-1.5">
           <input
-            id="bpm"
+            id={id}
             type="number"
             inputMode="numeric"
             min={MIN_BPM}
@@ -92,7 +97,7 @@ export function TempoControl({
         </div>
       </div>
       <Slider
-        aria-label="Tempo"
+        aria-label={label}
         value={[bpm]}
         min={MIN_BPM}
         max={MAX_BPM}

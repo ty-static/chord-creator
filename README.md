@@ -63,6 +63,10 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   MIDI page (with a timer and level meter, up to 5 minutes). The take is
   saved as a WAV with the quiet start and end cut, and its notes are found
   the same way.
+- **Click while recording** — a bar of count-in, then a click on every beat at
+  a tempo you set (remembered). The take starts on the first downbeat, allowing
+  for the audio latency, so the notes land on the bars, the tempo is the
+  click's instead of a guess, and bar lines show on the waveform.
 - **Make an arrangement** — turn the notes found into a new song: chords
   worked out to fit the tune, a bass line and a pop drum beat, ready to edit
   and export.
