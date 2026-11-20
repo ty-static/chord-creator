@@ -322,3 +322,61 @@ export function peaks(samples: Float32Array, width: number) {
   }
   return out
 }
+
+/** How finely notes are lined up with the beat. */
+export type Snap = "off" | "8" | "16"
+
+export const SNAPS: { value: Snap; label: string; hint: string }[] = [
+  { value: "off", label: "Off", hint: "Notes stay where they were played" },
+  {
+    value: "8",
+    label: "1/8 notes",
+    hint: "Notes start on the nearest half beat",
+  },
+  {
+    value: "16",
+    label: "1/16 notes",
+    hint: "Notes start on the nearest quarter of a beat",
+  },
+]
+
+/**
+ * Notes lined up with the beat at a tempo (beat 1 at 0 s): each start and
+ * end moves to the nearest step of the grid, every note lasts at least one
+ * step, and as a melody is one note at a time, notes that land on the same
+ * step become one (the longer) and a note ends where the next one starts.
+ */
+export function snapNotes(
+  notes: FoundNote[],
+  bpm: number,
+  snap: Snap
+): FoundNote[] {
+  if (snap === "off" || !notes.length) return notes
+  const step = 60 / bpm / (snap === "8" ? 2 : 4)
+  const at = (s: number) => Math.max(0, Math.round(s / step))
+  const snapped: {
+    pitch: number
+    from: number
+    to: number
+    velocity: number
+  }[] = []
+  for (const n of [...notes].sort((a, b) => a.start - b.start)) {
+    const from = at(n.start)
+    const to = Math.max(from + 1, at(n.end))
+    const last = snapped[snapped.length - 1]
+    if (last && last.from === from) {
+      // Two notes on one step: keep the longer.
+      if (to - from > last.to - last.from)
+        snapped[snapped.length - 1] = { ...n, from, to }
+      continue
+    }
+    if (last && last.to > from) last.to = from
+    snapped.push({ pitch: n.pitch, from, to, velocity: n.velocity })
+  }
+  return snapped.map((n) => ({
+    pitch: n.pitch,
+    start: n.from * step,
+    end: n.to * step,
+    velocity: n.velocity,
+  }))
+}

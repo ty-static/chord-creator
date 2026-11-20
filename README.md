@@ -67,6 +67,8 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   a tempo you set (remembered). The take starts on the first downbeat, allowing
   for the audio latency, so the notes land on the bars, the tempo is the
   click's instead of a guess, and bar lines show on the waveform.
+- **Snap to the beat** — line the notes found up with 1/8 or 1/16 notes, so
+  the MIDI is tight (on by default for a take recorded to a click).
 - **Make an arrangement** — turn the notes found into a new song: chords
   worked out to fit the tune, in a style you choose (pop, rock, ballad,
   dance, lo-fi, reggae or just chords) that sets the drum beat, how the

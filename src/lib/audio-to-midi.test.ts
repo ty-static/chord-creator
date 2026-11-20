@@ -8,6 +8,7 @@ import {
   framesToNotes,
   mono,
   peaks,
+  snapNotes,
   toParsedMidi,
   yin,
 } from "@/lib/audio-to-midi"
@@ -142,5 +143,49 @@ describe("audio to MIDI", () => {
     await expect(
       analyseFrames(tone(60, 30), SR, { signal: ctl.signal })
     ).rejects.toThrow("Cancelled")
+  })
+
+  it("lines notes up with the beat", () => {
+    const n = (pitch: number, start: number, end: number) => ({
+      pitch,
+      start,
+      end,
+      velocity: 90,
+    })
+    // At 120 BPM a 1/16 step is 0.125 s and a 1/8 step 0.25 s.
+    const played = [n(60, 0.04, 0.47), n(62, 0.52, 0.98), n(64, 1.07, 1.1)]
+    expect(snapNotes(played, 120, "off")).toBe(played)
+    expect(snapNotes(played, 120, "16")).toEqual([
+      n(60, 0, 0.5),
+      n(62, 0.5, 1),
+      // Too short to round to a step: it gets one.
+      n(64, 1.125, 1.25),
+    ])
+    expect(snapNotes(played, 120, "8").map((x) => [x.start, x.end])).toEqual([
+      [0, 0.5],
+      [0.5, 1],
+      [1, 1.25],
+    ])
+  })
+
+  it("keeps a snapped melody one note at a time", () => {
+    const n = (pitch: number, start: number, end: number) => ({
+      pitch,
+      start,
+      end,
+      velocity: 90,
+    })
+    // A grace note and the note after it land on one step: the longer stays.
+    // A note held into the next one ends where that one starts.
+    const out = snapNotes(
+      [n(60, 0, 0.9), n(61, 0.48, 0.52), n(62, 0.51, 1), n(64, 0.95, 1.5)],
+      120,
+      "8"
+    )
+    expect(out.map((x) => [x.pitch, x.start, x.end])).toEqual([
+      [60, 0, 0.5],
+      [62, 0.5, 1],
+      [64, 1, 1.5],
+    ])
   })
 })

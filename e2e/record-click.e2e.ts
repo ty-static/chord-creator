@@ -58,15 +58,35 @@ test("records to a click, keeping its tempo", async ({ page }) => {
   // The take starts on the first downbeat, so the first note does too
   // (within 0.15 s, under a third of a beat: the fake microphone starts a
   // little before the page asks for it, so its timing is only roughly known).
-  const start = await page.evaluate(async () => {
-    const audio = document.querySelector("audio")!
-    if (!audio.duration) await new Promise((r) => (audio.onloadedmetadata = r))
-    const x = Number(
-      document.querySelector("svg[role=img] rect")!.getAttribute("x")
-    )
-    return (x / 600) * audio.duration
-  })
-  expect(Math.abs(start)).toBeLessThan(0.15)
+  const starts = () =>
+    page.evaluate(async () => {
+      const audio = document.querySelector("audio")!
+      if (!audio.duration)
+        await new Promise((r) => (audio.onloadedmetadata = r))
+      return [...document.querySelectorAll("svg[role=img] rect")].map(
+        (r) => (Number(r.getAttribute("x")) / 600) * audio.duration
+      )
+    })
+  expect(Math.abs((await starts())[0])).toBeLessThan(0.15)
+
+  // A take to a click is snapped to 1/16 notes (0.125 s at 120 BPM)…
+  const snap = page.getByRole("combobox", { name: "Snap to the beat" })
+  await expect(snap).toHaveText("1/16 notes")
+  const onGrid = (xs: number[], step: number) =>
+    xs.every((x) => Math.abs(x / step - Math.round(x / step)) < 0.05)
+  const sixteenths = await starts()
+  expect(onGrid(sixteenths, 0.125)).toBe(true)
+  // …or 1/8 notes, or left as played.
+  await snap.click()
+  await page.getByRole("option", { name: "1/8 notes" }).click()
+  expect(onGrid(await starts(), 0.25)).toBe(true)
+  await snap.click()
+  await page.getByRole("option", { name: "Off" }).click()
+  await expect(
+    page.getByText("Notes stay where they were played")
+  ).toBeVisible()
+  // (The fake singer is nearly in time, so only the exact places differ.)
+  expect(await starts()).not.toEqual(sixteenths)
 
   // The setting is remembered.
   await page.reload()

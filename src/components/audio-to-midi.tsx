@@ -23,6 +23,13 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -34,6 +41,9 @@ import {
   analyseFrames,
   decodeAudio,
   estimateTempo,
+  SNAPS,
+  type Snap,
+  snapNotes,
   framesToNotes,
   peaks,
   toEvents,
@@ -140,6 +150,8 @@ export function AudioToMidi({
   const [loaded, setLoaded] = React.useState<Loaded | null>(null)
   const [result, setResult] = React.useState<Result | null>(null)
   const [bpm, setBpm] = React.useState(120)
+  // Lining the notes up with the beat: on for a take to a click.
+  const [snap, setSnap] = React.useState<Snap>("off")
   const [sensitivity, setSensitivity] = React.useState(0.5)
   // Clicking along while recording (remembered between visits).
   const [click, setClick] = React.useState(loadClick)
@@ -267,6 +279,7 @@ export function AudioToMidi({
       const detected = rec.bpm ?? estimateTempo(notes, frames, hop)
       setResult({ notes, detected, clicked: rec.bpm !== undefined })
       setBpm(detected)
+      setSnap(rec.bpm !== undefined ? "16" : "off")
       setStatus(
         notes.length
           ? { state: "idle" }
@@ -333,9 +346,15 @@ export function AudioToMidi({
     return () => clearTimeout(t)
   }, [dropped])
 
+  const found = React.useMemo(() => result?.notes ?? [], [result])
+  // What's played, drawn, downloaded and arranged.
+  const notes = React.useMemo(
+    () => snapNotes(found, bpm, snap),
+    [found, bpm, snap]
+  )
   const parsed = React.useMemo(
-    () => (result ? toParsedMidi(result.notes, bpm) : null),
-    [result, bpm]
+    () => (result ? toParsedMidi(notes, bpm) : null),
+    [result, notes, bpm]
   )
   const key = React.useMemo(
     () =>
@@ -344,7 +363,6 @@ export function AudioToMidi({
         : null,
     [parsed, result]
   )
-  const notes = React.useMemo(() => result?.notes ?? [], [result])
   const lowest = notes.length ? Math.min(...notes.map((n) => n.pitch)) : 0
   const highest = notes.length ? Math.max(...notes.map((n) => n.pitch)) : 0
   const name = loaded ? base(loaded.file.name) : ""
@@ -590,7 +608,7 @@ export function AudioToMidi({
         <Card>
           <CardHeader>
             <CardTitle>
-              {notes.length} {notes.length === 1 ? "note" : "notes"} found
+              {found.length} {found.length === 1 ? "note" : "notes"} found
             </CardTitle>
             <CardDescription>
               Check the tempo before you download: the notes are placed on bars
@@ -617,6 +635,28 @@ export function AudioToMidi({
               ))}
             </dl>
             <TempoControl bpm={bpm} onChange={(v) => setBpm(v)} />
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="snap">Snap to the beat</Label>
+              <Select value={snap} onValueChange={(v) => setSnap(v as Snap)}>
+                <SelectTrigger id="snap" className="w-full sm:w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SNAPS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {SNAPS.find((o) => o.value === snap)!.hint}
+                {snap !== "off" &&
+                  !result.clicked &&
+                  ". Works best when the first note is on the beat"}
+                .
+              </p>
+            </div>
             <div className="flex flex-wrap gap-2">
               <Button
                 variant={previewing ? "destructive" : "default"}
