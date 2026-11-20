@@ -48,6 +48,16 @@ test("turns a recording into MIDI notes", async ({ page }) => {
   const dialog = page.getByRole("dialog", { name: "Import MIDI file" })
   await expect(dialog).toBeVisible()
   await expect(dialog).toContainText("Melody")
+  // Choose a style: it sets the drums, chords, bass and sounds.
+  await expect(dialog.locator("[data-import-summary]")).toContainText(
+    "pop drum beat"
+  )
+  await dialog.getByRole("combobox", { name: "Style" }).click()
+  await page.getByRole("option", { name: "Reggae" }).click()
+  await expect(dialog.locator("[data-style-hint]")).toContainText("one-drop")
+  await expect(dialog.locator("[data-import-summary]")).toContainText(
+    "reggae drum beat"
+  )
   await dialog.getByRole("button", { name: "Import", exact: true }).click()
   await expect(dialog).toBeHidden()
   await expect(page.getByRole("tab", { name: "Song" })).toHaveAttribute(
@@ -55,6 +65,21 @@ test("turns a recording into MIDI notes", async ({ page }) => {
     "true"
   )
   await expect(page.locator("header")).toContainText("scale")
+  await expect(
+    page.getByRole("combobox", { name: "Chord rhythm", exact: true })
+  ).toHaveText("Off-beat")
+
+  // The style is remembered for next time; "Just chords" has no drums.
+  await page.getByRole("tab", { name: "Audio to MIDI" }).click()
+  await page.getByRole("button", { name: "Make an arrangement" }).click()
+  await expect(dialog.getByRole("combobox", { name: "Style" })).toHaveText(
+    "Reggae"
+  )
+  await dialog.getByRole("combobox", { name: "Style" }).click()
+  await page.getByRole("option", { name: "Just chords" }).click()
+  await expect(dialog.locator("[data-import-summary]")).toContainText(
+    "no drums"
+  )
 })
 
 test("a recording opened from the song page goes to Audio to MIDI", async ({

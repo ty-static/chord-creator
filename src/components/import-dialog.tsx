@@ -40,11 +40,31 @@ import {
   uid,
 } from "@/lib/music"
 import { makeSection } from "@/lib/sections"
+import {
+  ARRANGE_STYLES,
+  type ArrangeStyleId,
+  applyStyle,
+  arrangeStyle,
+  styleDrums,
+} from "@/lib/styles"
+
+/** The style last used for an arrangement. */
+const STYLE_KEY = "chord-creator:arrange-style"
+const savedStyle = () => {
+  try {
+    return arrangeStyle(localStorage.getItem(STYLE_KEY)).id
+  } catch {
+    return arrangeStyle(null).id
+  }
+}
 
 export interface PendingImport {
   filename: string
   midi: ParsedMidi
-  /** Making an arrangement of a tune: add a drum beat if it has none. */
+  /**
+   * Making an arrangement of a tune: choose a style, which sets the chords,
+   * bass, instruments and (if the tune has none) the drums.
+   */
   arrange?: boolean
 }
 
@@ -88,6 +108,17 @@ function ImportForm({ pending, song, onCancel, onImport }: Props) {
   )
   const bpm = Math.max(50, Math.min(200, midi.bpm))
   const hasMelody = Object.values(roles).includes("melody")
+  const arrange = !!pending!.arrange
+  const [styleId, setStyleId] = React.useState<ArrangeStyleId>(savedStyle)
+  const style = arrangeStyle(styleId)
+  const chooseStyle = (id: ArrangeStyleId) => {
+    setStyleId(id)
+    try {
+      localStorage.setItem(STYLE_KEY, id)
+    } catch {
+      // Private mode: just not remembered.
+    }
+  }
 
   const setRole = (id: string, role: PartRole) =>
     setRoles((r) => {
@@ -99,19 +130,22 @@ function ImportForm({ pending, song, onCancel, onImport }: Props) {
       return next
     })
 
-  const addDrums = !!pending!.arrange && !result.drums
+  const addDrums = arrange && !result.drums && !!style.drums
   const doImport = () => {
     const section = makeSection(
       "Verse",
       result.chords,
       result.melody,
-      result.drums ?? {
-        ...DEFAULT_DRUMS,
-        enabled: addDrums,
-        pattern: presetPattern("pop", result.meter),
-      }
+      result.drums ??
+        (arrange
+          ? styleDrums(style, result.meter)
+          : {
+              ...DEFAULT_DRUMS,
+              enabled: false,
+              pattern: presetPattern("pop", result.meter),
+            })
     )
-    const rest = { ...song }
+    const rest = arrange ? applyStyle(song, style) : { ...song }
     delete rest.meter
     onImport(
       {
@@ -121,7 +155,7 @@ function ImportForm({ pending, song, onCancel, onImport }: Props) {
         bpm,
         sections: [section],
         arrangement: [{ id: uid(), section: section.id }],
-        bass: result.bass || song.bass,
+        bass: result.bass || rest.bass,
       },
       `“${filename}”`
     )
@@ -231,6 +265,35 @@ function ImportForm({ pending, song, onCancel, onImport }: Props) {
         </div>
       </div>
 
+      {arrange && (
+        <div className="flex flex-col gap-2">
+          <Label
+            htmlFor="arrange-style"
+            className="text-xs text-muted-foreground"
+          >
+            Style
+          </Label>
+          <Select
+            value={styleId}
+            onValueChange={(v) => chooseStyle(v as ArrangeStyleId)}
+          >
+            <SelectTrigger id="arrange-style" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ARRANGE_STYLES.map((s) => (
+                <SelectItem key={s.id} value={s.id}>
+                  {s.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground" data-style-hint>
+            {style.hint}.
+          </p>
+        </div>
+      )}
+
       <div className="flex flex-col gap-2 rounded-lg bg-muted/50 p-3 text-sm">
         <p className="text-xs font-medium text-muted-foreground">
           You&apos;ll get
@@ -250,7 +313,11 @@ function ImportForm({ pending, song, onCancel, onImport }: Props) {
         <p className="text-xs text-muted-foreground" data-import-summary>
           {result.bars} bars · {result.chords.length} chords ·{" "}
           {hasMelody ? `${result.melody.length} melody notes` : "no melody"} ·{" "}
-          {result.drums ? "drum beat" : addDrums ? "pop drum beat" : "no drums"}{" "}
+          {result.drums
+            ? "drum beat"
+            : addDrums
+              ? `${style.label.toLowerCase()} drum beat`
+              : "no drums"}{" "}
           · {bpm} BPM
         </p>
         {(result.truncated ||
@@ -281,8 +348,11 @@ function ImportForm({ pending, song, onCancel, onImport }: Props) {
           </ul>
         )}
         <p className="text-xs text-muted-foreground">
-          Chords are worked out from the harmony and snapped to the key. Your
-          instruments and mix are kept. You can undo the import.
+          Chords are worked out from the harmony and snapped to the key.{" "}
+          {arrange
+            ? "The style sets the instruments and how the chords and bass are played; your mix is kept."
+            : "Your instruments and mix are kept."}{" "}
+          You can undo the import.
         </p>
       </div>
 

@@ -68,8 +68,9 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   for the audio latency, so the notes land on the bars, the tempo is the
   click's instead of a guess, and bar lines show on the waveform.
 - **Make an arrangement** — turn the notes found into a new song: chords
-  worked out to fit the tune, a bass line and a pop drum beat, ready to edit
-  and export.
+  worked out to fit the tune, in a style you choose (pop, rock, ballad,
+  dance, lo-fi, reggae or just chords) that sets the drum beat, how the
+  chords and bass are played and the instruments, ready to edit and export.
 - **MIDI keyboard** — Web MIDI input (Chrome/Edge): play through the current
   instrument, add chords by playing them, step-enter melody notes.
 - **Section style** — per section: which tracks play (no drums in the intro,
@@ -192,6 +193,7 @@ Built with Vite, React 19, TypeScript, Tailwind CSS v4 and
 | `src/lib/midi-input.ts`    | Web MIDI keyboard input                                                   |
 | `src/lib/audio-to-midi.ts` | Pitch detection, notes and tempo from a recording (Audio to MIDI)         |
 | `src/lib/recorder.ts`      | Microphone recording as raw samples, trimming, saving takes as WAV        |
+| `src/lib/styles.ts`        | Arrangement styles: drums, chord rhythm, bass and instruments together    |
 | `src/components/`          | Editors, timeline, sound panel, dialogs and shadcn/ui components          |
 
 ## Deployment
