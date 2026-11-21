@@ -67,6 +67,8 @@ export interface MidiOptions {
   keySig: { sf: number; minor: boolean }
   /** General MIDI program per track (defaults: piano / piano / finger bass). */
   programs?: Partial<Record<TrackName, number>>
+  /** Track names (defaults: Chords, Melody, Bass, Drums). */
+  names?: Partial<Record<TrackName, string>>
   /** Channel volume (CC7) per track, 0..1. */
   volumes?: Partial<Record<TrackName, number>>
   /** Named points in the song (sections), shown as markers in DAWs. */
@@ -144,7 +146,7 @@ export function buildMidi(events: NoteEvent[], opts: MidiOptions): Uint8Array {
     const { channel } = TRACK_INFO[name]
     const program = opts.programs?.[name] ?? TRACK_INFO[name].program
     const raw: Raw[] = [
-      metaName(TRACK_INFO[name].name),
+      metaName(opts.names?.[name] ?? TRACK_INFO[name].name),
       { tick: 0, order: 1, bytes: [0xc0 | channel, program] },
     ]
     const vol = opts.volumes?.[name]

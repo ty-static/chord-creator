@@ -59,6 +59,16 @@ sampled instruments, and export a multi-track MIDI file for your DAW.
   one melody (WAV, or MP3/OGG/FLAC) becomes MIDI notes, on the device. Pitch
   by YIN, a tempo guess from the onsets, then play or download as `.mid`.
   Dropping a recording anywhere opens it there. (Brought over from SoundCheck.)
+- **Song to MIDI** — choose "A full song" on the Audio to MIDI page and a
+  whole mix is split into vocals, bass, drums and the rest (guitars, keys) by
+  HTDemucs (Meta, MIT), run in the browser with ONNX Runtime Web (on the GPU
+  with WebGPU, otherwise the CPU). Each pitched part's notes are found with
+  Basic Pitch (Spotify, Apache 2.0, TensorFlow.js); the drums become kick,
+  snare and hi-hat hits from their onsets. The tempo and beat come from the
+  drums. Listen to each part on its own, download its MIDI or all of them as
+  one file (a track each), play them, or make an arrangement. The splitter
+  model (about 172 MB, from Hugging Face) is downloaded the first time and
+  kept in the browser's cache; it all runs in a worker, on the device.
 - **Record an idea** — sing, hum or play into the microphone on the Audio to
   MIDI page (with a timer and level meter, up to 5 minutes). The take is
   saved as a WAV with the quiet start and end cut, and its notes are found
@@ -149,7 +159,8 @@ npm run build    # type-check + production build into dist/
 - **Browser tests** (`e2e/*.e2e.ts`, Playwright) build the app and click
   through it in Chromium: adding chords, undo/redo, playback, My songs, share
   links, MIDI/WAV/stems export, the chord chart, MIDI and song-file import, key changes,
-  Audio to MIDI (from a file and from a fake microphone),
+  Audio to MIDI (from a file and from a fake microphone), the full-song mode
+  (up to the model download, which the offline tests can't make),
   melody linking, opening offline, and the header and layout at phone,
   tablet and desktop widths.
   An accessibility suite runs axe on each screen in both themes and checks
@@ -195,6 +206,8 @@ Built with Vite, React 19, TypeScript, Tailwind CSS v4 and
 | `src/lib/midi-input.ts`    | Web MIDI keyboard input                                                   |
 | `src/lib/audio-to-midi.ts` | Pitch detection, notes and tempo from a recording (Audio to MIDI)         |
 | `src/lib/recorder.ts`      | Microphone recording as raw samples, trimming, saving takes as WAV        |
+| `src/lib/stems.ts`         | Song to MIDI: drum hits, tempo and beat, stems as MIDI; runs the worker   |
+| `src/lib/stems.worker.ts`  | Splits a song (HTDemucs) and finds each part's notes (Basic Pitch)        |
 | `src/lib/styles.ts`        | Arrangement styles: drums, chord rhythm, bass and instruments together    |
 | `src/components/`          | Editors, timeline, sound panel, dialogs and shadcn/ui components          |
 

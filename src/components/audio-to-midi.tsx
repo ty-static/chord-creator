@@ -13,6 +13,7 @@ import {
   XIcon,
 } from "lucide-react"
 
+import { SongToMidi } from "@/components/song-to-midi"
 import { TempoControl } from "@/components/tempo-control"
 import { Button } from "@/components/ui/button"
 import {
@@ -32,6 +33,7 @@ import {
 } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   ANALYSIS_RATE,
   type FoundNote,
@@ -65,7 +67,7 @@ import { clampBpm } from "@/lib/tempo"
 import type { PlaySettings } from "@/lib/use-player"
 import { cn } from "@/lib/utils"
 
-interface Player {
+export interface Player {
   play: (settings: PlaySettings, from: number) => Promise<void> | void
   stop: () => void
   playing: boolean
@@ -103,6 +105,17 @@ type Status =
   | { state: "idle" }
   | { state: "working"; step: string; progress: number }
   | { state: "error"; message: string }
+
+/** What's in the recording: one melody line, or a whole song to split. */
+type Mode = "melody" | "song"
+const MODE_KEY = "chord-creator:audio-mode"
+function loadMode(): Mode {
+  try {
+    return localStorage.getItem(MODE_KEY) === "song" ? "song" : "melody"
+  } catch {
+    return "melody"
+  }
+}
 
 interface ClickSettings {
   on: boolean
@@ -153,6 +166,7 @@ export function AudioToMidi({
   // Lining the notes up with the beat: on for a take to a click.
   const [snap, setSnap] = React.useState<Snap>("off")
   const [sensitivity, setSensitivity] = React.useState(0.5)
+  const [mode, setMode] = React.useState<Mode>(loadMode)
   // Clicking along while recording (remembered between visits).
   const [click, setClick] = React.useState(loadClick)
   const { on: clickOn, bpm: clickBpm } = click
@@ -329,7 +343,9 @@ export function AudioToMidi({
         bpm: clickedBpm,
       }
       setLoaded(rec)
-      await convert(rec)
+      // A whole song waits for "Split into instruments".
+      if (mode === "song") setStatus({ state: "idle" })
+      else await convert(rec)
     } catch {
       setStatus({
         state: "error",
@@ -389,6 +405,17 @@ export function AudioToMidi({
     downloadBytes(bytes, `${name}.mid`)
   }
 
+  const changeMode = (next: Mode) => {
+    setMode(next)
+    try {
+      localStorage.setItem(MODE_KEY, next)
+    } catch {
+      /* private mode: just don't remember */
+    }
+    player.stop()
+    if (next === "melody" && loaded && !result && !busy) void convert(loaded)
+  }
+
   // Seconds on the page, for the playhead.
   const at =
     player.beat !== null && player.playing ? (player.beat * 60) / bpm : null
@@ -399,12 +426,30 @@ export function AudioToMidi({
         <CardHeader>
           <CardTitle>Audio to MIDI</CardTitle>
           <CardDescription>
-            Turn a recording of one melody (singing, humming or a single
-            instrument) into MIDI notes, from a file or the microphone. It all
-            happens on this device; nothing is uploaded.
+            {mode === "melody"
+              ? "Turn a recording of one melody (singing, humming or a single instrument) into MIDI notes, from a file or the microphone."
+              : "Turn a whole song into MIDI: it's split into vocals, bass, drums and the rest, each with its own notes."}{" "}
+            It all happens on this device; nothing is uploaded.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm font-medium" id="audio-mode-label">
+              What&apos;s in the recording?
+            </span>
+            <ToggleGroup
+              type="single"
+              variant="outline"
+              size="sm"
+              value={mode}
+              onValueChange={(v) => v && changeMode(v as Mode)}
+              aria-labelledby="audio-mode-label"
+              disabled={busy}
+            >
+              <ToggleGroupItem value="melody">One melody</ToggleGroupItem>
+              <ToggleGroupItem value="song">A full song</ToggleGroupItem>
+            </ToggleGroup>
+          </div>
           <input
             ref={inputRef}
             type="file"
@@ -539,7 +584,9 @@ export function AudioToMidi({
             </div>
           )}
 
-          <div className="flex flex-col gap-2">
+          <div
+            className={cn("flex flex-col gap-2", mode === "song" && "hidden")}
+          >
             <div className="flex items-center justify-between gap-2">
               <Label htmlFor="sensitivity">Sensitivity</Label>
               <span className="text-xs text-muted-foreground">
@@ -604,98 +651,114 @@ export function AudioToMidi({
         </CardContent>
       </Card>
 
-      {result && notes.length > 0 && key && parsed && loaded && (
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              {found.length} {found.length === 1 ? "note" : "notes"} found
-            </CardTitle>
-            <CardDescription>
-              Check the tempo before you download: the notes are placed on bars
-              at this speed.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-5">
-            <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {[
-                ["Key", keyLabel(key)],
-                result.clicked
-                  ? ["Tempo (click)", `${result.detected} BPM`]
-                  : ["Tempo found", `${result.detected} BPM`],
-                [
-                  "Range",
-                  `${noteNameWithOctave(lowest, key)} – ${noteNameWithOctave(highest, key)}`,
-                ],
-                ["Length", fmt(loaded.duration)],
-              ].map(([label, value]) => (
-                <div key={label} className="rounded-lg border px-3 py-2">
-                  <dt className="text-xs text-muted-foreground">{label}</dt>
-                  <dd className="font-medium">{value}</dd>
-                </div>
-              ))}
-            </dl>
-            <TempoControl bpm={bpm} onChange={(v) => setBpm(v)} />
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="snap">Snap to the beat</Label>
-              <Select value={snap} onValueChange={(v) => setSnap(v as Snap)}>
-                <SelectTrigger id="snap" className="w-full sm:w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SNAPS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                {SNAPS.find((o) => o.value === snap)!.hint}
-                {snap !== "off" &&
-                  !result.clicked &&
-                  ". Works best when the first note is on the beat"}
-                .
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant={previewing ? "destructive" : "default"}
-                onClick={togglePreview}
-              >
-                {player.loading ? (
-                  <Loader2Icon className="animate-spin" />
-                ) : previewing ? (
-                  <SquareIcon />
-                ) : (
-                  <PlayIcon />
-                )}
-                {player.loading
-                  ? "Loading"
-                  : previewing
-                    ? "Stop"
-                    : "Play the notes"}
-              </Button>
-              <Button variant="outline" onClick={download}>
-                <DownloadIcon /> Download MIDI
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  player.stop()
-                  onOpenAsSong(parsed, `${name}.mid`)
-                }}
-              >
-                <SquarePenIcon /> Make an arrangement
-              </Button>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Make an arrangement opens the tune as a new song, with chords
-              worked out to fit it and a bass line and drums, ready to edit and
-              export as MIDI.
-            </p>
-          </CardContent>
-        </Card>
+      {mode === "song" && loaded && (
+        <SongToMidi
+          key={loaded.url}
+          file={loaded.file}
+          duration={loaded.duration}
+          player={player}
+          instruments={instruments}
+          onOpenAsSong={onOpenAsSong}
+        />
       )}
+
+      {mode === "melody" &&
+        result &&
+        notes.length > 0 &&
+        key &&
+        parsed &&
+        loaded && (
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                {found.length} {found.length === 1 ? "note" : "notes"} found
+              </CardTitle>
+              <CardDescription>
+                Check the tempo before you download: the notes are placed on
+                bars at this speed.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-5">
+              <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {[
+                  ["Key", keyLabel(key)],
+                  result.clicked
+                    ? ["Tempo (click)", `${result.detected} BPM`]
+                    : ["Tempo found", `${result.detected} BPM`],
+                  [
+                    "Range",
+                    `${noteNameWithOctave(lowest, key)} – ${noteNameWithOctave(highest, key)}`,
+                  ],
+                  ["Length", fmt(loaded.duration)],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-lg border px-3 py-2">
+                    <dt className="text-xs text-muted-foreground">{label}</dt>
+                    <dd className="font-medium">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <TempoControl bpm={bpm} onChange={(v) => setBpm(v)} />
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="snap">Snap to the beat</Label>
+                <Select value={snap} onValueChange={(v) => setSnap(v as Snap)}>
+                  <SelectTrigger id="snap" className="w-full sm:w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SNAPS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {SNAPS.find((o) => o.value === snap)!.hint}
+                  {snap !== "off" &&
+                    !result.clicked &&
+                    ". Works best when the first note is on the beat"}
+                  .
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant={previewing ? "destructive" : "default"}
+                  onClick={togglePreview}
+                >
+                  {player.loading ? (
+                    <Loader2Icon className="animate-spin" />
+                  ) : previewing ? (
+                    <SquareIcon />
+                  ) : (
+                    <PlayIcon />
+                  )}
+                  {player.loading
+                    ? "Loading"
+                    : previewing
+                      ? "Stop"
+                      : "Play the notes"}
+                </Button>
+                <Button variant="outline" onClick={download}>
+                  <DownloadIcon /> Download MIDI
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    player.stop()
+                    onOpenAsSong(parsed, `${name}.mid`)
+                  }}
+                >
+                  <SquarePenIcon /> Make an arrangement
+                </Button>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Make an arrangement opens the tune as a new song, with chords
+                worked out to fit it and a bass line and drums, ready to edit
+                and export as MIDI.
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
       {!loaded && status.state !== "working" && (
         <p className="flex items-center justify-center gap-2 text-center text-sm text-muted-foreground">

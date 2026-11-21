@@ -4,7 +4,7 @@
 
 import type { NoteEvent } from "@/lib/arrange"
 import type { ParsedMidi, RawNote } from "@/lib/midi-import"
-import { clampBpm } from "@/lib/tempo"
+import { tempoFromEnvelope } from "@/lib/tempo"
 
 /** Audio is analysed at this rate: plenty for a melody, and quick. */
 export const ANALYSIS_RATE = 11025
@@ -226,26 +226,7 @@ export function estimateTempo(
     const i = Math.round(n.start / hopSeconds)
     if (i < env.length) env[i] += n.velocity / 127
   }
-  let best = 120
-  let bestScore = -Infinity
-  for (let bpm = 60; bpm <= 180; bpm += 0.5) {
-    const lag = 60 / bpm / hopSeconds
-    let s = 0
-    // The beat and its double both count.
-    for (const mult of [1, 2]) {
-      const l = lag * mult
-      const lo = Math.floor(l)
-      const f = l - lo
-      for (let i = 0; i + lo + 1 < env.length; i++)
-        s += (env[i] * (env[i + lo] * (1 - f) + env[i + lo + 1] * f)) / mult
-    }
-    s *= Math.exp(-0.5 * (Math.log2(bpm / 110) / 0.6) ** 2)
-    if (s > bestScore) {
-      bestScore = s
-      best = bpm
-    }
-  }
-  return clampBpm(Math.round(best))
+  return tempoFromEnvelope(env, hopSeconds)
 }
 
 /** Notes in beats at a tempo, as the MIDI importer expects them. */

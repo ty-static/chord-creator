@@ -388,19 +388,29 @@ function windowWeights(
   to: number
 ) {
   const weights = Array<number>(12).fill(0)
-  let lowest: number | null = null
-  const add = (n: RawNote, factor: number) => {
-    const overlap = Math.min(n.end, to) - Math.max(n.start, from)
-    if (overlap <= 0) return false
-    weights[n.pitch % 12] += overlap * factor
-    return true
+  const overlapOf = (n: RawNote) =>
+    Math.min(n.end, to) - Math.max(n.start, from)
+  // The bass note: with a bass part, the one heard longest in the window
+  // (the lowest on a tie), so a note that only grazes its edge doesn't
+  // count; otherwise the lowest note heard for at least a 32nd.
+  const heard = Array<number>(128).fill(0)
+  for (const n of bassNotes) {
+    const o = overlapOf(n)
+    if (o <= 0) continue
+    weights[n.pitch % 12] += o * 1.5
+    heard[n.pitch] += o
   }
-  for (const n of bassNotes)
-    if (add(n, 1.5) && (lowest === null || n.pitch < lowest)) lowest = n.pitch
-  for (const n of notes)
-    if (add(n, 1) && !bassNotes.length && (lowest === null || n.pitch < lowest))
-      lowest = n.pitch
-  return { weights, bassPc: lowest === null ? null : lowest % 12 }
+  for (const n of notes) {
+    const o = overlapOf(n)
+    if (o <= 0) continue
+    weights[n.pitch % 12] += o
+    if (!bassNotes.length && o >= 1 / 8)
+      heard[n.pitch] = Math.max(heard[n.pitch], 1)
+  }
+  let bass: number | null = null
+  for (let p = 0; p < 128; p++)
+    if (heard[p] > 0 && (bass === null || heard[p] > heard[bass])) bass = p
+  return { weights, bassPc: bass === null ? null : bass % 12 }
 }
 
 export function midiToSong(

@@ -19,6 +19,10 @@ function publicFiles(dir = resolve(import.meta.dirname, "public")): string[] {
   )
 }
 
+/** Build files fetched only when used: the instrument splitter's worker,
+ *  its WebAssembly and the note model. */
+const ON_DEMAND = /(\.wasm$|stems\.worker|group1-shard|\/model-[^/]*\.json$)/
+
 /**
  * Writes sw.js, the service worker that makes the app work offline, with the
  * list of every file of this build. Its version changes whenever any file
@@ -33,6 +37,9 @@ function serviceWorker(): Plugin {
         "/",
         ...Object.keys(bundle)
           .filter((f) => f !== "index.html" && !f.endsWith(".map"))
+          // The instrument splitter (about 30 MB) loads only when a song is
+          // split, so it isn't downloaded for everyone up front.
+          .filter((f) => !ON_DEMAND.test(f))
           .map((f) => "/" + f),
         ...publicFiles(),
       ].sort()
